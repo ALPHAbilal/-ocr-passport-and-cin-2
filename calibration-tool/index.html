@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CNIE Field Calibration Tool</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1117; color: #e1e1e6; min-height: 100vh; }
+
+        .header { padding: 12px 20px; background: #161820; border-bottom: 1px solid #2a2d3a; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .header h1 { font-size: 16px; font-weight: 600; white-space: nowrap; }
+
+        .btn { padding: 6px 14px; border: 1px solid #3a3d4a; background: #1e2030; color: #e1e1e6; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all 0.15s; white-space: nowrap; }
+        .btn:hover { background: #2a2d40; border-color: #5a5d6a; }
+        .btn.active { background: #2563eb; border-color: #3b82f6; color: #fff; }
+        .btn.success { background: #059669; border-color: #10b981; color: #fff; }
+        .btn.warn { background: #d97706; border-color: #f59e0b; color: #fff; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .side-select { display: flex; gap: 0; }
+        .side-select .btn { border-radius: 0; }
+        .side-select .btn:first-child { border-radius: 6px 0 0 6px; }
+        .side-select .btn:last-child { border-radius: 0 6px 6px 0; }
+
+        .version-select { display: flex; gap: 0; }
+        .version-select .btn { border-radius: 0; font-size: 12px; padding: 4px 10px; }
+        .version-select .btn:first-child { border-radius: 6px 0 0 6px; }
+        .version-select .btn:last-child { border-radius: 0 6px 6px 0; }
+
+        .sep { width: 1px; height: 24px; background: #2a2d3a; }
+
+        .main { display: flex; height: calc(100vh - 49px); }
+
+        .canvas-area { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; background: #0a0b0f; position: relative; }
+        .canvas-area.dragover { background: #0f1a2e; }
+
+        .drop-zone { display: flex; flex-direction: column; align-items: center; gap: 12px; color: #5a5d6a; text-align: center; padding: 20px; }
+        .drop-zone .icon { font-size: 48px; }
+        .drop-zone label { color: #3b82f6; cursor: pointer; text-decoration: underline; }
+        .drop-zone .note { font-size: 12px; color: #4a4d5a; margin-top: 8px; line-height: 1.6; }
+
+        .canvas-wrapper { position: relative; display: inline-block; }
+        .canvas-wrapper canvas { display: block; cursor: crosshair; }
+
+        .sidebar { width: 320px; background: #161820; border-left: 1px solid #2a2d3a; overflow-y: auto; flex-shrink: 0; display: flex; flex-direction: column; }
+        .sidebar-section { padding: 10px 14px; border-bottom: 1px solid #2a2d3a; }
+        .sidebar-section h3 { font-size: 11px; text-transform: uppercase; color: #6b7280; margin-bottom: 6px; letter-spacing: 0.5px; }
+
+        .field-item { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 4px; cursor: pointer; font-size: 12px; margin-bottom: 1px; }
+        .field-item:hover { background: #1e2030; }
+        .field-item.selected { background: #1e3a5f; }
+        .field-item .color-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .field-item .name { flex: 1; font-family: monospace; }
+        .field-item .coords { font-size: 10px; color: #6b7280; font-family: monospace; }
+        .field-item .del-btn { background: none; border: none; color: #6b7280; cursor: pointer; font-size: 13px; padding: 0 2px; line-height: 1; }
+        .field-item .del-btn:hover { color: #ef4444; }
+
+        .add-field { display: flex; gap: 4px; margin-top: 6px; }
+        .add-field input { flex: 1; padding: 5px 8px; background: #0f1117; border: 1px solid #2a2d3a; border-radius: 4px; color: #e1e1e6; font-size: 12px; font-family: monospace; }
+        .add-field input::placeholder { color: #4a4d5a; }
+
+        .coord-edit { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 12px; }
+        .coord-edit label { display: flex; align-items: center; gap: 4px; color: #9ca3af; }
+        .coord-edit input { width: 100%; padding: 3px 6px; background: #0f1117; border: 1px solid #2a2d3a; border-radius: 3px; color: #e1e1e6; font-size: 12px; font-family: monospace; }
+
+        .output-box { background: #0f1117; border: 1px solid #2a2d3a; border-radius: 6px; padding: 10px; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; white-space: pre; overflow-x: auto; line-height: 1.5; color: #a5d6ff; flex: 1; min-height: 100px; }
+
+        .info-bar { padding: 6px 14px; background: #161820; border-top: 1px solid #2a2d3a; display: flex; gap: 16px; font-size: 11px; color: #6b7280; font-family: monospace; }
+
+        .presets { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+        .presets .btn { padding: 2px 6px; font-size: 10px; }
+
+        .tabs { display: flex; border-bottom: 1px solid #2a2d3a; }
+        .tab { padding: 7px 14px; cursor: pointer; font-size: 12px; color: #6b7280; border-bottom: 2px solid transparent; }
+        .tab:hover { color: #e1e1e6; }
+        .tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+        .tab-content { display: none; }
+        .tab-content.active { display: flex; flex-direction: column; flex: 1; overflow-y: auto; }
+
+        .zoom-controls { display: flex; align-items: center; gap: 3px; }
+        .zoom-controls .btn { padding: 3px 8px; font-size: 13px; }
+        .zoom-label { font-size: 11px; color: #6b7280; min-width: 36px; text-align: center; }
+
+        #fileInput { display: none; }
+
+        .processing-overlay {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.85);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 12px; z-index: 100; color: #e1e1e6; font-size: 14px;
+        }
+        .processing-overlay .spinner {
+            width: 40px; height: 40px; border: 3px solid #2a2d3a; border-top-color: #3b82f6;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>CNIE Calibration</h1>
+        <div class="side-select">
+            <button class="btn active" data-side="front" onclick="switchSide('front')">Front</button>
+            <button class="btn" data-side="back" onclick="switchSide('back')">Back</button>
+        </div>
+        <div class="version-select">
+            <button class="btn active" data-ver="new" onclick="switchVersion('new')">New CNIE</button>
+            <button class="btn" data-ver="old" onclick="switchVersion('old')">Old CNIE</button>
+        </div>
+        <div class="sep"></div>
+        <label class="btn" for="fileInput" id="uploadBtn">Upload Card Photo</label>
+        <input type="file" id="fileInput" accept="image/*">
+        <button class="btn" onclick="rotateImage()">Rotate 90</button>
+        <div class="zoom-controls">
+            <button class="btn" onclick="changeZoom(-0.1)">-</button>
+            <span class="zoom-label" id="zoomLabel">100%</span>
+            <button class="btn" onclick="changeZoom(0.1)">+</button>
+            <button class="btn" onclick="resetZoom()">Fit</button>
+        </div>
+        <div class="sep"></div>
+        <button class="btn" onclick="loadPresets()">Load Presets</button>
+        <button class="btn warn" onclick="clearFields()">Clear All</button>
+        <button class="btn success" onclick="exportAll()">Export All</button>
+    </div>
+
+    <div class="main">
+        <div class="canvas-area" id="canvasArea">
+            <div class="drop-zone" id="dropZone">
+                <div class="icon">+</div>
+                <p id="dropMsg">Loading OpenCV.js...</p>
+                <p><label for="fileInput">or click to browse</label></p>
+                <div class="note">
+                    Auto-detects the green CNIE card and crops to 856x540<br>
+                    Uses the same OpenCV pipeline as the notebook<br>
+                    Use "Rotate 90" if the card appears sideways<br>
+                    Coordinates = exact pixel values for the OCR pipeline
+                </div>
+            </div>
+            <div class="canvas-wrapper" id="canvasWrapper" style="display:none;">
+                <canvas id="mainCanvas"></canvas>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('fields')">Fields</div>
+                <div class="tab" onclick="switchTab('output')">Output</div>
+            </div>
+
+            <div class="tab-content active" id="tab-fields">
+                <div class="sidebar-section">
+                    <h3 id="sideLabel">Front — New CNIE</h3>
+                    <div id="fieldList"></div>
+                    <div class="add-field">
+                        <input type="text" id="newFieldName" placeholder="field_name" onkeydown="if(event.key==='Enter') addField()">
+                        <button class="btn" onclick="addField()">+</button>
+                    </div>
+                    <div class="presets" id="presetButtons"></div>
+                </div>
+
+                <div class="sidebar-section" id="selectedPanel" style="display:none;">
+                    <h3 id="selectedLabel">Selected</h3>
+                    <div class="coord-edit">
+                        <label>X <input type="number" id="fX" onchange="coordInput()"></label>
+                        <label>Y <input type="number" id="fY" onchange="coordInput()"></label>
+                        <label>W <input type="number" id="fW" onchange="coordInput()"></label>
+                        <label>H <input type="number" id="fH" onchange="coordInput()"></label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-output">
+                <div class="sidebar-section" style="flex:1; display:flex; flex-direction:column;">
+                    <h3>Python Templates — copy to your project</h3>
+                    <div class="output-box" id="outputBox">Draw field boxes to generate output.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="info-bar">
+        <span id="mouseInfo">x: — y: —</span>
+        <span id="imgInfo">No image</span>
+        <span id="fieldInfo">Fields: 0</span>
+        <span>Arrow keys: nudge | Shift+Arrow: 10px | Del: delete</span>
+    </div>
+
+    <!-- Load OpenCV.js — same engine as Python cv2 -->
+    <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()" onerror="onOpenCvError()"></script>
+
+    <script>
+    let cvReady = false;
+
+    function onOpenCvReady() {
+        // OpenCV.js loads asynchronously and sets a global `cv` object
+        // But it may need a moment to initialize via its Module system
+        if (typeof cv !== 'undefined' && cv.Mat) {
+            cvReady = true;
+            document.getElementById('dropMsg').innerHTML = 'Drop your <strong>card photo</strong> here (raw or cropped)';
+            document.getElementById('uploadBtn').style.opacity = '1';
+            console.log('OpenCV.js ready');
+        } else {
+            // cv module loaded but not initialized yet — poll
+            const check = setInterval(() => {
+                if (typeof cv !== 'undefined' && cv.Mat) {
+                    clearInterval(check);
+                    cvReady = true;
+                    document.getElementById('dropMsg').innerHTML = 'Drop your <strong>card photo</strong> here (raw or cropped)';
+                    document.getElementById('uploadBtn').style.opacity = '1';
+                    console.log('OpenCV.js ready (after polling)');
+                }
+            }, 100);
+            // Stop polling after 30s
+            setTimeout(() => clearInterval(check), 30000);
+        }
+    }
+
+    function onOpenCvError() {
+        document.getElementById('dropMsg').innerHTML =
+            'Drop your <strong>card photo</strong> here (raw or cropped)<br>' +
+            '<span style="color:#ef4444;font-size:11px;">OpenCV.js failed to load — card detection disabled, will use raw image</span>';
+        document.getElementById('uploadBtn').style.opacity = '1';
+        console.warn('OpenCV.js failed to load');
+    }
+
+    const COLORS = [
+        '#3b82f6','#ef4444','#10b981','#f59e0b','#8b5cf6',
+        '#ec4899','#06b6d4','#f97316','#84cc16','#6366f1',
+        '#14b8a6','#e11d48','#a855f7','#0ea5e9','#eab308'
+    ];
+
+    const PRESETS = {
+        new: {
+            front: [
+                { name: 'card_number',      x: 500, y: 60,  w: 330, h: 50 },
+                { name: 'last_name_fr',     x: 210, y: 110, w: 620, h: 45 },
+                { name: 'last_name_ar',     x: 210, y: 155, w: 620, h: 40 },
+                { name: 'first_name_fr',    x: 210, y: 195, w: 620, h: 40 },
+                { name: 'first_name_ar',    x: 210, y: 235, w: 620, h: 40 },
+                { name: 'date_of_birth',    x: 210, y: 275, w: 260, h: 40 },
+                { name: 'place_of_birth_fr',x: 210, y: 315, w: 620, h: 40 },
+                { name: 'gender',           x: 210, y: 355, w: 80,  h: 35 },
+                { name: 'address',          x: 210, y: 390, w: 620, h: 70 },
+                { name: 'expiry_date',      x: 210, y: 460, w: 260, h: 45 },
+                { name: 'photo',            x: 20,  y: 60,  w: 180, h: 220 },
+            ],
+            back: [
+                { name: 'card_number_back', x: 20,  y: 0,   w: 400, h: 55 },
+                { name: 'personal_number',  x: 20,  y: 55,  w: 400, h: 55 },
+                { name: 'father_name_fr',   x: 20,  y: 110, w: 816, h: 40 },
+                { name: 'father_name_ar',   x: 20,  y: 150, w: 816, h: 40 },
+                { name: 'mother_name_fr',   x: 20,  y: 190, w: 816, h: 40 },
+                { name: 'mother_name_ar',   x: 20,  y: 230, w: 816, h: 40 },
+                { name: 'mrz_line_1',       x: 0,   y: 390, w: 856, h: 48 },
+                { name: 'mrz_line_2',       x: 0,   y: 438, w: 856, h: 48 },
+                { name: 'mrz_line_3',       x: 0,   y: 486, w: 856, h: 48 },
+            ],
+        },
+        old: { front: [], back: [] },
+    };
+
+    let S = {
+        side: 'front',
+        version: 'new',
+        zoom: 1,
+        images: { new: { front: null, back: null }, old: { front: null, back: null } },
+        rawImages: { new: { front: null, back: null }, old: { front: null, back: null } },
+        fields: { new: { front: [], back: [] }, old: { front: [], back: [] } },
+        sel: -1,
+        drawing: false,
+        dragging: false,
+        resizing: false,
+        resizeDir: null,
+        dragOff: { x: 0, y: 0 },
+        colorIdx: 0,
+    };
+
+    const canvas = document.getElementById('mainCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function F() { return S.fields[S.version][S.side]; }
+    function I() { return S.images[S.version][S.side]; }
+
+    function switchSide(side) {
+        S.side = side; S.sel = -1;
+        document.querySelectorAll('.side-select .btn').forEach(b => b.classList.toggle('active', b.dataset.side === side));
+        refresh();
+    }
+
+    function switchVersion(ver) {
+        S.version = ver; S.sel = -1;
+        document.querySelectorAll('.version-select .btn').forEach(b => b.classList.toggle('active', b.dataset.ver === ver));
+        refresh();
+    }
+
+    function refresh() {
+        document.getElementById('sideLabel').textContent =
+            `${S.side === 'front' ? 'Front' : 'Back'} — ${S.version === 'new' ? 'New' : 'Old'} CNIE`;
+        if (I()) { showCanvas(); render(); } else { hideCanvas(); }
+        renderList();
+        updatePresets();
+        updateSelected();
+    }
+
+    function switchTab(t) {
+        document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelector(`.tab:nth-child(${t === 'fields' ? 1 : 2})`).classList.add('active');
+        document.getElementById(`tab-${t}`).classList.add('active');
+        if (t === 'output') genOutput();
+    }
+
+    function showCanvas() {
+        document.getElementById('dropZone').style.display = 'none';
+        document.getElementById('canvasWrapper').style.display = 'inline-block';
+    }
+    function hideCanvas() {
+        document.getElementById('dropZone').style.display = 'flex';
+        document.getElementById('canvasWrapper').style.display = 'none';
+    }
+
+    function showProcessing(msg) {
+        let ov = document.getElementById('processingOverlay');
+        if (!ov) {
+            ov = document.createElement('div');
+            ov.id = 'processingOverlay';
+            ov.className = 'processing-overlay';
+            document.getElementById('canvasArea').appendChild(ov);
+        }
+        ov.innerHTML = `<div class="spinner"></div><div>${msg}</div>`;
+        ov.style.display = 'flex';
+    }
+    function hideProcessing() {
+        const ov = document.getElementById('processingOverlay');
+        if (ov) ov.style.display = 'none';
+    }
+
+    // ============================================================
+    // Card detection using OpenCV.js — exact same pipeline as notebook
+    //
+    // Notebook code (Python):
+    //   hsv = cv2.cvtColor(front, cv2.COLOR_BGR2HSV)
+    //   mask = cv2.inRange(hsv, [30,20,80], [90,255,255])
+    //   mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel(7,7), iterations=3)
+    //   mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel(7,7), iterations=1)
+    //   contours = cv2.findContours(mask, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE)
+    //   approx = cv2.approxPolyDP(cnt, 0.02*peri, True) → 4 corners
+    //   matrix = cv2.getPerspectiveTransform(ordered, dst)
+    //   cropped = cv2.warpPerspective(front, matrix, (856, 540))
+    // ============================================================
+
+    function detectAndCropCard(imgElement) {
+        if (!cvReady) {
+            console.log('OpenCV not ready, skipping detection');
+            return null;
+        }
+
+        try {
+            // Load image into OpenCV Mat (reads as RGBA from canvas)
+            const src = cv.imread(imgElement);
+            const bgr = new cv.Mat();
+            cv.cvtColor(src, bgr, cv.COLOR_RGBA2BGR);
+
+            // Step 1: Convert to HSV
+            const hsv = new cv.Mat();
+            cv.cvtColor(bgr, hsv, cv.COLOR_BGR2HSV);
+
+            // Step 2: Green mask — same range as notebook
+            const lower = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [30, 20, 80, 0]);
+            const upper = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [90, 255, 255, 255]);
+            const mask = new cv.Mat();
+            cv.inRange(hsv, lower, upper, mask);
+
+            // Step 3: Morphological close (fill holes) + open (remove noise)
+            // Exact same as notebook: kernel(7,7), close x3, open x1
+            const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(7, 7));
+
+            const closed = new cv.Mat();
+            cv.morphologyEx(mask, closed, cv.MORPH_CLOSE, kernel, new cv.Point(-1, -1), 3);
+
+            const cleaned = new cv.Mat();
+            cv.morphologyEx(closed, cleaned, cv.MORPH_OPEN, kernel, new cv.Point(-1, -1), 1);
+
+            // Step 4: Find contours
+            const contours = new cv.MatVector();
+            const hierarchy = new cv.Mat();
+            cv.findContours(cleaned, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+            // Find the largest contour by area
+            let largestIdx = -1, largestArea = 0;
+            for (let i = 0; i < contours.size(); i++) {
+                const a = cv.contourArea(contours.get(i));
+                if (a > largestArea) { largestArea = a; largestIdx = i; }
+            }
+
+            // Need at least some green detected
+            if (largestIdx < 0 || largestArea < src.rows * src.cols * 0.05) {
+                console.log('Card not detected — not enough green area');
+                src.delete(); bgr.delete(); hsv.delete();
+                lower.delete(); upper.delete(); mask.delete();
+                kernel.delete(); closed.delete(); cleaned.delete();
+                contours.delete(); hierarchy.delete();
+                return null;
+            }
+
+            // Step 5: Use minAreaRect for precise rotated rectangle corners
+            // This is more accurate than approxPolyDP — it computes the
+            // mathematically optimal rotated rectangle that fits the contour,
+            // giving exact corners even when the card is tilted
+            const largest = contours.get(largestIdx);
+            const rotRect = cv.minAreaRect(largest);
+            const vertices = cv.RotatedRect.points(rotRect);
+            console.log(`minAreaRect: center=(${rotRect.center.x.toFixed(0)},${rotRect.center.y.toFixed(0)}) size=${rotRect.size.width.toFixed(0)}x${rotRect.size.height.toFixed(0)} angle=${rotRect.angle.toFixed(1)}`);
+
+            // vertices = 4 corner points from minAreaRect
+            const pts = vertices.map(v => [v.x, v.y]);
+            const ordered = orderPoints(pts);
+            console.log('Ordered corners:', ordered);
+
+            // Step 6: Perspective warp to 856x540
+            const NORM_W = 856, NORM_H = 540;
+
+            const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+                ordered[0][0], ordered[0][1],
+                ordered[1][0], ordered[1][1],
+                ordered[2][0], ordered[2][1],
+                ordered[3][0], ordered[3][1],
+            ]);
+            const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+                0, 0,
+                NORM_W - 1, 0,
+                NORM_W - 1, NORM_H - 1,
+                0, NORM_H - 1,
+            ]);
+
+            const M = cv.getPerspectiveTransform(srcPts, dstPts);
+            const warped = new cv.Mat();
+            cv.warpPerspective(src, warped, M, new cv.Size(NORM_W, NORM_H));
+
+            // Check if needs rotation (taller than wide = wrong)
+            // Since we're warping to 856x540, this shouldn't happen,
+            // but check just in case the corners were mis-ordered
+            // (warped is already NORM_W x NORM_H so skip this check)
+
+            // Convert warped Mat to canvas, then to Image
+            const outCanvas = document.createElement('canvas');
+            outCanvas.width = NORM_W;
+            outCanvas.height = NORM_H;
+            cv.imshow(outCanvas, warped);
+
+            // Cleanup all Mats
+            src.delete(); bgr.delete(); hsv.delete();
+            lower.delete(); upper.delete(); mask.delete();
+            kernel.delete(); closed.delete(); cleaned.delete();
+            contours.delete(); hierarchy.delete();
+            srcPts.delete(); dstPts.delete(); M.delete(); warped.delete();
+
+            return outCanvas;
+
+        } catch (err) {
+            console.error('Card detection error:', err);
+            return null;
+        }
+    }
+
+    function orderPoints(pts) {
+        // Order 4 points as: top-left, top-right, bottom-right, bottom-left
+        // Same algorithm as notebook's order_points()
+        const sums = pts.map(p => p[0] + p[1]);
+        const diffs = pts.map(p => p[0] - p[1]);
+
+        const tl = pts[sums.indexOf(Math.min(...sums))];   // smallest sum
+        const br = pts[sums.indexOf(Math.max(...sums))];   // largest sum
+        const tr = pts[diffs.indexOf(Math.max(...diffs))];  // largest difference
+        const bl = pts[diffs.indexOf(Math.min(...diffs))];  // smallest difference
+
+        return [tl, tr, br, bl];
+    }
+
+    // ============================================================
+    // Image loading
+    // ============================================================
+
+    function loadImage(file) {
+        const reader = new FileReader();
+        reader.onload = e => {
+            const img = new Image();
+            img.onload = () => {
+                S.rawImages[S.version][S.side] = img;
+                processAndDisplay(img);
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function processAndDisplay(img) {
+        const origW = img.naturalWidth || img.width;
+        const origH = img.naturalHeight || img.height;
+
+        showCanvas();
+        showProcessing('Detecting card...');
+
+        // Need to draw image to a hidden canvas for cv.imread()
+        const hiddenCanvas = document.createElement('canvas');
+        hiddenCanvas.width = origW;
+        hiddenCanvas.height = origH;
+        hiddenCanvas.id = '_cvInput';
+        hiddenCanvas.style.display = 'none';
+        document.body.appendChild(hiddenCanvas);
+        hiddenCanvas.getContext('2d').drawImage(img, 0, 0);
+
+        setTimeout(() => {
+            const cropped = detectAndCropCard(hiddenCanvas);
+            document.body.removeChild(hiddenCanvas);
+
+            if (cropped) {
+                const croppedImg = new Image();
+                croppedImg.onload = () => {
+                    S.images[S.version][S.side] = croppedImg;
+                    document.getElementById('imgInfo').textContent =
+                        `${origW}x${origH} -> cropped 856x540`;
+                    hideProcessing();
+                    resetZoom();
+                    render();
+                };
+                croppedImg.src = cropped.toDataURL('image/jpeg', 0.95);
+            } else {
+                S.images[S.version][S.side] = img;
+                document.getElementById('imgInfo').textContent =
+                    `${origW}x${origH} (no green card detected, using raw)`;
+                hideProcessing();
+                resetZoom();
+                render();
+            }
+        }, 50);
+    }
+
+    function rotateImage() {
+        const raw = S.rawImages[S.version][S.side];
+        if (!raw) return;
+
+        showProcessing('Rotating...');
+
+        setTimeout(() => {
+            const rw = raw.naturalHeight || raw.height;
+            const rh = raw.naturalWidth || raw.width;
+            const rc = document.createElement('canvas');
+            rc.width = rw;
+            rc.height = rh;
+            const rctx = rc.getContext('2d');
+            rctx.translate(rw, 0);
+            rctx.rotate(Math.PI / 2);
+            rctx.drawImage(raw, 0, 0);
+
+            const rotated = new Image();
+            rotated.onload = () => {
+                S.rawImages[S.version][S.side] = rotated;
+                processAndDisplay(rotated);
+            };
+            rotated.src = rc.toDataURL('image/jpeg', 0.95);
+        }, 50);
+    }
+
+    document.getElementById('fileInput').addEventListener('change', e => {
+        if (e.target.files[0]) loadImage(e.target.files[0]);
+    });
+
+    const area = document.getElementById('canvasArea');
+    area.addEventListener('dragover', e => { e.preventDefault(); area.classList.add('dragover'); });
+    area.addEventListener('dragleave', () => area.classList.remove('dragover'));
+    area.addEventListener('drop', e => { e.preventDefault(); area.classList.remove('dragover'); if (e.dataTransfer.files[0]) loadImage(e.dataTransfer.files[0]); });
+
+    // ============================================================
+    // Zoom
+    // ============================================================
+    function changeZoom(d) {
+        S.zoom = Math.max(0.3, Math.min(3, S.zoom + d));
+        document.getElementById('zoomLabel').textContent = Math.round(S.zoom * 100) + '%';
+        render();
+    }
+    function resetZoom() {
+        const img = I();
+        if (!img) return;
+        const a = document.getElementById('canvasArea');
+        const iw = img.naturalWidth || img.width;
+        const ih = img.naturalHeight || img.height;
+        S.zoom = Math.min((a.clientWidth - 20) / iw, (a.clientHeight - 20) / ih, 2);
+        document.getElementById('zoomLabel').textContent = Math.round(S.zoom * 100) + '%';
+        render();
+    }
+
+    // ============================================================
+    // Render
+    // ============================================================
+    function render() {
+        const img = I();
+        if (!img) return;
+        const z = S.zoom;
+        const iw = img.naturalWidth || img.width;
+        const ih = img.naturalHeight || img.height;
+        const w = Math.round(iw * z);
+        const h = Math.round(ih * z);
+        canvas.width = w; canvas.height = h;
+        canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+
+        // Grid every 50px
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = 1;
+        for (let gx = 0; gx < iw; gx += 50) {
+            ctx.beginPath(); ctx.moveTo(gx * z, 0); ctx.lineTo(gx * z, h); ctx.stroke();
+        }
+        for (let gy = 0; gy < ih; gy += 50) {
+            ctx.beginPath(); ctx.moveTo(0, gy * z); ctx.lineTo(w, gy * z); ctx.stroke();
+        }
+
+        // Fields
+        F().forEach((f, i) => {
+            const sel = i === S.sel;
+            ctx.strokeStyle = f.color;
+            ctx.lineWidth = sel ? 2.5 : 1.5;
+            ctx.setLineDash(sel ? [] : [4, 2]);
+            ctx.strokeRect(f.x * z, f.y * z, f.w * z, f.h * z);
+            ctx.setLineDash([]);
+            ctx.fillStyle = f.color + (sel ? '30' : '15');
+            ctx.fillRect(f.x * z, f.y * z, f.w * z, f.h * z);
+
+            const fs = Math.max(9, 11 * z);
+            ctx.font = `600 ${fs}px monospace`;
+            ctx.fillStyle = '#000';
+            ctx.fillText(f.name, f.x * z + 3, f.y * z - 3 > fs ? f.y * z - 3 : f.y * z + fs + 2);
+            ctx.fillStyle = f.color;
+            ctx.fillText(f.name, f.x * z + 2, f.y * z - 4 > fs ? f.y * z - 4 : f.y * z + fs + 1);
+        });
+
+        document.getElementById('fieldInfo').textContent = `Fields: ${F().length}`;
+    }
+
+    // ============================================================
+    // Mouse interaction
+    // ============================================================
+    function pos(e) {
+        const r = canvas.getBoundingClientRect();
+        return { x: Math.round((e.clientX - r.left) / S.zoom), y: Math.round((e.clientY - r.top) / S.zoom) };
+    }
+
+    canvas.addEventListener('mousemove', e => {
+        const p = pos(e);
+        document.getElementById('mouseInfo').textContent = `x: ${p.x}  y: ${p.y}`;
+
+        if (S.drawing) {
+            const f = F()[S.sel];
+            f.w = Math.max(1, p.x - f.x); f.h = Math.max(1, p.y - f.y);
+            render(); updateSelected(); return;
+        }
+        if (S.dragging) {
+            const f = F()[S.sel];
+            f.x = Math.max(0, p.x - S.dragOff.x);
+            f.y = Math.max(0, p.y - S.dragOff.y);
+            render(); renderList(); updateSelected(); return;
+        }
+        if (S.resizing) {
+            const f = F()[S.sel], d = S.resizeDir;
+            if (d.includes('e')) f.w = Math.max(5, p.x - f.x);
+            if (d.includes('s')) f.h = Math.max(5, p.y - f.y);
+            if (d.includes('w')) { const dx = p.x - f.x; f.x = p.x; f.w = Math.max(5, f.w - dx); }
+            if (d.includes('n')) { const dy = p.y - f.y; f.y = p.y; f.h = Math.max(5, f.h - dy); }
+            render(); renderList(); updateSelected(); return;
+        }
+        const h = hit(p);
+        canvas.style.cursor = h.handle ? h.handle + '-resize' : h.idx >= 0 ? 'move' : 'crosshair';
+    });
+
+    canvas.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        const p = pos(e), h = hit(p);
+
+        if (h.handle && h.idx >= 0) {
+            S.resizing = true; S.resizeDir = h.handle; S.sel = h.idx;
+            renderList(); updateSelected(); return;
+        }
+        if (h.idx >= 0) {
+            S.dragging = true; S.sel = h.idx;
+            const f = F()[h.idx];
+            S.dragOff = { x: p.x - f.x, y: p.y - f.y };
+            renderList(); updateSelected(); return;
+        }
+
+        const name = document.getElementById('newFieldName').value.trim() || `field_${F().length + 1}`;
+        const color = COLORS[S.colorIdx++ % COLORS.length];
+        F().push({ name, x: p.x, y: p.y, w: 1, h: 1, color });
+        S.sel = F().length - 1;
+        S.drawing = true;
+        document.getElementById('newFieldName').value = '';
+        renderList(); updateSelected();
+    });
+
+    canvas.addEventListener('mouseup', () => {
+        if (S.drawing && F()[S.sel]) {
+            const f = F()[S.sel];
+            if (f.w < 3 && f.h < 3) { F().splice(S.sel, 1); S.sel = -1; }
+        }
+        S.drawing = S.dragging = S.resizing = false;
+        render(); renderList();
+    });
+
+    function hit(p) {
+        const m = 6 / S.zoom;
+        if (S.sel >= 0) {
+            const f = F()[S.sel];
+            if (Math.abs(p.x - f.x) < m && Math.abs(p.y - f.y) < m) return { idx: S.sel, handle: 'nw' };
+            if (Math.abs(p.x - (f.x + f.w)) < m && Math.abs(p.y - f.y) < m) return { idx: S.sel, handle: 'ne' };
+            if (Math.abs(p.x - f.x) < m && Math.abs(p.y - (f.y + f.h)) < m) return { idx: S.sel, handle: 'sw' };
+            if (Math.abs(p.x - (f.x + f.w)) < m && Math.abs(p.y - (f.y + f.h)) < m) return { idx: S.sel, handle: 'se' };
+            if (Math.abs(p.x - (f.x + f.w)) < m && p.y > f.y && p.y < f.y + f.h) return { idx: S.sel, handle: 'e' };
+            if (Math.abs(p.x - f.x) < m && p.y > f.y && p.y < f.y + f.h) return { idx: S.sel, handle: 'w' };
+            if (Math.abs(p.y - (f.y + f.h)) < m && p.x > f.x && p.x < f.x + f.w) return { idx: S.sel, handle: 's' };
+            if (Math.abs(p.y - f.y) < m && p.x > f.x && p.x < f.x + f.w) return { idx: S.sel, handle: 'n' };
+        }
+        for (let i = F().length - 1; i >= 0; i--) {
+            const f = F()[i];
+            if (p.x >= f.x && p.x <= f.x + f.w && p.y >= f.y && p.y <= f.y + f.h) return { idx: i, handle: null };
+        }
+        return { idx: -1, handle: null };
+    }
+
+    // ============================================================
+    // Sidebar: field list, selection, coordinates
+    // ============================================================
+    function renderList() {
+        const list = document.getElementById('fieldList');
+        list.innerHTML = F().map((f, i) => `
+            <div class="field-item ${i === S.sel ? 'selected' : ''}" onclick="selectField(${i})">
+                <span class="color-dot" style="background:${f.color}"></span>
+                <span class="name">${f.name}</span>
+                <span class="coords">${Math.round(f.x)},${Math.round(f.y)} ${Math.round(f.w)}x${Math.round(f.h)}</span>
+                <button class="del-btn" onclick="event.stopPropagation();delField(${i})">x</button>
+            </div>`).join('');
+    }
+
+    function selectField(i) { S.sel = i; renderList(); updateSelected(); render(); }
+
+    function updateSelected() {
+        const panel = document.getElementById('selectedPanel');
+        if (S.sel < 0) { panel.style.display = 'none'; return; }
+        panel.style.display = 'block';
+        const f = F()[S.sel];
+        document.getElementById('selectedLabel').textContent = f.name;
+        document.getElementById('fX').value = Math.round(f.x);
+        document.getElementById('fY').value = Math.round(f.y);
+        document.getElementById('fW').value = Math.round(f.w);
+        document.getElementById('fH').value = Math.round(f.h);
+    }
+
+    function coordInput() {
+        if (S.sel < 0) return;
+        const f = F()[S.sel];
+        f.x = parseInt(document.getElementById('fX').value) || 0;
+        f.y = parseInt(document.getElementById('fY').value) || 0;
+        f.w = parseInt(document.getElementById('fW').value) || 5;
+        f.h = parseInt(document.getElementById('fH').value) || 5;
+        render(); renderList();
+    }
+
+    function delField(i) {
+        F().splice(i, 1);
+        if (S.sel === i) S.sel = -1;
+        else if (S.sel > i) S.sel--;
+        render(); renderList(); updateSelected(); updatePresets();
+    }
+
+    function addField() {
+        const name = document.getElementById('newFieldName').value.trim();
+        if (!name) return;
+        F().push({ name, x: 50, y: 50, w: 200, h: 40, color: COLORS[S.colorIdx++ % COLORS.length] });
+        document.getElementById('newFieldName').value = '';
+        S.sel = F().length - 1;
+        render(); renderList(); updateSelected(); updatePresets();
+    }
+
+    function clearFields() {
+        if (!confirm('Clear all fields for this side?')) return;
+        S.fields[S.version][S.side] = [];
+        S.sel = -1;
+        render(); renderList(); updateSelected(); updatePresets();
+    }
+
+    // ============================================================
+    // Presets
+    // ============================================================
+    function loadPresets() {
+        const p = PRESETS[S.version]?.[S.side] || [];
+        if (p.length === 0) { alert('No presets for this version/side yet.'); return; }
+        S.fields[S.version][S.side] = p.map((f, i) => ({ ...f, color: COLORS[i % COLORS.length] }));
+        S.colorIdx = p.length; S.sel = -1;
+        render(); renderList(); updatePresets();
+    }
+
+    function updatePresets() {
+        const p = PRESETS[S.version]?.[S.side] || [];
+        const existing = F().map(f => f.name);
+        document.getElementById('presetButtons').innerHTML = p
+            .filter(f => !existing.includes(f.name))
+            .map(f => `<button class="btn" onclick="addPreset('${f.name}')">${f.name}</button>`).join('');
+    }
+
+    function addPreset(name) {
+        const p = (PRESETS[S.version]?.[S.side] || []).find(f => f.name === name);
+        if (!p) return;
+        F().push({ ...p, color: COLORS[S.colorIdx++ % COLORS.length] });
+        S.sel = F().length - 1;
+        render(); renderList(); updatePresets(); updateSelected();
+    }
+
+    // ============================================================
+    // Output generation
+    // ============================================================
+    function genOutput() {
+        const box = document.getElementById('outputBox');
+        let out = '';
+        for (const ver of ['new', 'old']) {
+            for (const side of ['front', 'back']) {
+                const fields = S.fields[ver][side];
+                if (fields.length === 0) continue;
+                const label = `${ver.toUpperCase()}_${side.toUpperCase()}`;
+                out += `# templates/${ver}_${side}.py\n\n`;
+                out += `${label}_FIELDS = {\n`;
+                fields.forEach(f => {
+                    out += `    "${f.name}": {"x": ${Math.round(f.x)}, "y": ${Math.round(f.y)}, "w": ${Math.round(f.w)}, "h": ${Math.round(f.h)}},\n`;
+                });
+                out += `}\n\n`;
+            }
+        }
+        box.textContent = out || 'No fields defined yet.';
+    }
+
+    function exportAll() {
+        genOutput();
+        const text = document.getElementById('outputBox').textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            const btn = document.querySelector('.btn.success');
+            btn.textContent = 'Copied!';
+            setTimeout(() => btn.textContent = 'Export All', 1500);
+        });
+        switchTab('output');
+    }
+
+    // ============================================================
+    // Keyboard shortcuts
+    // ============================================================
+    document.addEventListener('keydown', e => {
+        if (e.target.tagName === 'INPUT') return;
+        if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel >= 0) delField(S.sel);
+        if (e.key === 'Escape') { S.sel = -1; render(); renderList(); updateSelected(); }
+        if (S.sel >= 0 && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            e.preventDefault();
+            const f = F()[S.sel], step = e.shiftKey ? 10 : 1;
+            if (e.key === 'ArrowLeft') f.x = Math.max(0, f.x - step);
+            if (e.key === 'ArrowRight') f.x += step;
+            if (e.key === 'ArrowUp') f.y = Math.max(0, f.y - step);
+            if (e.key === 'ArrowDown') f.y += step;
+            render(); renderList(); updateSelected();
+        }
+    });
+
+    // Init
+    updatePresets(); renderList();
+    </script>
+</body>
+</html>
