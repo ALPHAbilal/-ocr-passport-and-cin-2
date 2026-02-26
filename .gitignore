@@ -1,0 +1,52 @@
+# Virtual environments
+ocr_env/
+venv/
+env/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment variables
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Model files (large)
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pkl
+*.model
+
+# Temporary files
+*.tmp
+*.temp
+
+# WhatsApp images
+WhatsApp Image*

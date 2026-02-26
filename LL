@@ -1,0 +1,123 @@
+● Here's why PaddleOCR failed to import:
+
+  The Error Chain
+
+  1. The fatal error (line 102 in resulte3.md):
+  OSError: [WinError 127] Error loading "torch\lib\shm.dll"
+
+  This is a Python 3.13 incompatibility. Your system has Python 3.13 (cp313 in the download URL). PyTorch's shm.dll    
+  (shared memory library) uses C extensions that aren't compiled for Python 3.13 on Windows yet.
+
+  2. Why is torch even involved? The import chain is:
+  from paddleocr import PaddleOCR
+    → from paddlex.inference.utils.benchmark import benchmark
+      → imports torch internally
+        → torch\lib\shm.dll fails to load
+
+  The new PaddleOCR (v3.x) depends on paddlex, and paddlex pulls in PyTorch as a dependency. This wasn't the case with d   
+  older PaddleOCR versions.
+
+  3. The protobuf conflict (lines 54-59) is secondary but also broken:                                                 ────
+  - PaddleOCR needs protobuf < 4.0 → installed 3.20.3
+  - But grpcio-status needs protobuf >= 6.31.1                                                                         ────
+  - And opentelemetry-proto needs protobuf >= 5.0
+
+  These can't coexist.
+
+  Root Cause
+
+  Python 3.13 is too new. Both PaddleOCR and EasyOCR (as noted in EASYOCR.md) don't support it on Windows:
+  - PaddleOCR: torch DLL fails on 3.13
+  - EasyOCR: explicitly warns "Python 3.13 causes ModuleNotFoundError: No module named 'torch.backends'"
+
+  Your Options
+  Option: A) Python 3.10/3.11 venv — Create a virtual environment with an older Python. Both PaddleOCR and EasyOCR work
+    on 3.10/3.11
+  Effort: Medium — need to install Python 3.11 alongside 3.13
+  Risk: Low
+  ────────────────────────────────────────
+  Option: B) Older PaddleOCR (v2.x) — pip install paddleocr==2.7.0 didn't depend on paddlex/torch
+  Effort: Low — just change the version
+  Risk: Medium — v2.x may lack PP-OCRv4
+  ────────────────────────────────────────
+  Option: C) EasyOCR with Python 3.11 venv — Same venv approach but test EasyOCR instead
+  Effort: Medium
+  Risk: Low
+  ────────────────────────────────────────
+  Option: D) Cloud API — Azure Document Intelligence has a dedicated Moroccan ID model, skip local OCR entirely        
+  Effort: Low code, needs API key
+  Risk: Ongoing cost
+  My recommendation: Option A — install Python 3.11, create a venv, then test PaddleOCR there. One install fixes both  
+  PaddleOCR and EasyOCR if you want to compare them later.
+
+  No changes made. Let me know which direction you want to go.
+
+✻ Cooked for 2m 32s
+
+❯ yes i would install that guide me to do that  
+
+● Step-by-step: Python 3.11 venv for PaddleOCR
+
+  Step 1 — Download Python 3.11
+
+  Go to: https://www.python.org/downloads/release/python-3119/
+
+  Scroll down to Files, download: Windows installer (64-bit)
+
+  Run the installer:
+  - Check "Add python.exe to PATH"
+  - Click "Install Now"
+
+  Don't uninstall Python 3.13 — they coexist fine.
+
+  Step 2 — Verify Python 3.11 installed
+
+  Open a new CMD or PowerShell and run:
+
+  py -3.11 --version
+
+  You should see Python 3.11.9. If py doesn't work, try:
+  "C:\Users\User004\AppData\Local\Programs\Python\Python311\python.exe" --version
+
+  Step 3 — Create a virtual environment
+
+  In your project folder:
+
+  cd C:\Users\User004\Desktop\soufian_data\new
+  py -3.11 -m venv ocr_env
+
+  This creates an ocr_env folder with a clean Python 3.11.
+
+  Step 4 — Activate the venv
+
+  ocr_env\Scripts\activate
+
+  Your prompt should now show (ocr_env). Verify:
+  python --version
+  Should say Python 3.11.9.
+
+  Step 5 — Install everything in the venv
+
+  Run these in order:
+
+  python -m pip install --upgrade pip
+  python -m pip install jupyter notebook ipykernel
+  python -m pip install paddlepaddle==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+  python -m pip install paddleocr
+  pip install shapely scikit-image "protobuf>=3.20.0,<4.0"
+  pip install opencv-python numpy matplotlib
+
+  Step 6 — Register venv as a Jupyter kernel
+
+  python -m ipykernel install --user --name=ocr_env --display-name "Python 3.11 (OCR)"
+
+  Step 7 — Launch Jupyter and switch kernel
+
+  jupyter notebook
+
+  Open paddleocr_test.ipynb, then:
+  - Click Kernel → Change kernel → Python 3.11 (OCR)
+  - Re-run the cells
+
+  That's it. The venv isolates everything — your Python 3.13 system stays untouched. Let me know when you hit Step 5   
+  and I'll help if anything goes wrong.

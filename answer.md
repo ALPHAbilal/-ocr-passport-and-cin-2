@@ -1,429 +1,175 @@
-Here is a complete, production-ready reference covering every aspect of your PaddleOCR setup.
+Here's a comprehensive breakdown covering every aspect of your requirements for Arabic + French ID card OCR on CPU-only in 2025/2026.
 
 ***
 
-## Version Compatibility (Pick One Track)
+## Best CPU-Friendly OCR Solutions
 
-PaddleOCR 3.x completely broke backwards compatibility with 2.x — they use different APIs. Choose one track and stay consistent. [pypi](https://pypi.org/project/paddleocr/)
+### 1. Surya OCR (Top Open-Source Pick)
 
-| Track | PaddleOCR | PaddlePaddle | Python | API Method | Notes |
-|---|---|---|---|---|---|
-| **A (Stable/Legacy)** | `2.7.3` | `2.6.1` | 3.10 | `ocr.ocr()` | Most tutorial-compatible, stable on Windows |
-| **B (Modern, recommended)** | `3.0.3` | `3.0.0` | 3.10 | `ocr.predict()` | Better multilingual, Arabic, 109 langs |
-| Avoid | 3.2.0+ | 3.1.x+ | 3.11 | — | NumPy 2.x module compilation errors on Windows  [github](https://github.com/PaddlePaddle/PaddleOCR/discussions/16341) |
+Surya is currently the best open-source option for multilingual document OCR and supports 90+ languages including Arabic and French. It runs on CPU (Linux/Windows), though significantly slower than GPU mode. Its architecture is based on a **modified Donut model** with GQA and MoE layers, benchmarking at **0.97 avg similarity** vs Tesseract's 0.88. [pypi](https://pypi.org/project/surya-ocr/0.2.0/)
 
-**Recommendation: Use Track A for immediate Flask deployment.** Python 3.10 is the sweet spot — 3.11 has known compiled-module issues with both tracks, and 3.12 had strict numpy/pandas restrictions until PaddleOCR 3.0.2. [pypi](https://pypi.org/project/paddleocr/)
+```bash
+pip install surya-ocr
+```
+
+```python
+from surya.ocr import run_ocr
+from surya.model.detection.model import load_model as load_det
+from surya.model.recognition.model import load_model as load_rec
+from PIL import Image
+
+image = Image.open("id_card.jpg")
+langs = ["ar", "fr"]
+det_model, det_processor = load_det()
+rec_model, rec_processor = load_rec()
+
+predictions = run_ocr([image], [langs], det_model, det_processor, rec_model, rec_processor)
+```
+
+> **GitHub:** [datalab-to/surya](https://github.com/datalab-to/surya) [github](https://github.com/datalab-to/surya)
 
 ***
 
-## Installation (Track A — Copy-Paste Ready)
+### 2. Surya + Docling Pipeline (Structured Output)
 
-### Step 1: Create a clean virtual environment
-
-```bash
-python -m venv venv_ocr
-venv_ocr\Scripts\activate   # Windows
-```
-
-### Step 2: Install PaddlePaddle CPU-only
+Combining **Surya OCR** with **Docling** gives you layout-aware, structured document parsing — ideal for ID cards where field positions matter. Docling acts as an orchestration layer that converts Surya's raw detections into a coherent document schema. [dev](https://dev.to/aairom/using-suryaocr-with-docling-1d9k)
 
 ```bash
-# Track A — from standard PyPI
-pip install paddlepaddle==2.6.1
-
-# Track B — from Paddle's own index (REQUIRED for 3.x)
-# pip install paddlepaddle==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+pip install docling surya-ocr
 ```
 
-### Step 3: Install PaddleOCR (basic only — no Chinese NLP!)
-
-```bash
-# Track A — basic install, NO paddlenlp, NO Chinese tokenizers
-pip install paddleocr==2.7.3
-
-# Track B equivalent (do NOT use [all] — that pulls in NLP junk)
-# pip install paddleocr==3.0.3
-```
-
-The `paddleocr[all]` tag installs `paddlenlp`, `lmdb`, `sentencepiece`, layout analysis models, and more. For pure OCR, never use `[all]`. Just `pip install paddleocr` gives you detection + recognition + angle classifier — nothing else. [pypi](https://pypi.org/project/paddleocr/)
-
-### Step 4: Pin conflict-prone dependencies
-
-```bash
-pip install "numpy==1.26.4"
-pip install "protobuf==3.20.3"
-pip install "opencv-contrib-python==4.8.0.76"
-pip install "Pillow==10.2.0"
-```
-
-**Never install both `opencv-python` AND `opencv-contrib-python`** — they share file names and create version clashes. If one is already installed: [github](https://github.com/PaddlePaddle/PaddleOCR/issues/11555)
-```bash
-pip uninstall opencv-python opencv-contrib-python -y
-pip install opencv-contrib-python==4.8.0.76
-```
-
-### Full requirements.txt (Track A, Windows CPU)
-
-```text
-paddlepaddle==2.6.1
-paddleocr==2.7.3
-numpy==1.26.4
-protobuf==3.20.3
-opencv-contrib-python==4.8.0.76
-Pillow==10.2.0
-Flask==3.0.3
-```
+Docling also has a GitHub issue specifically tracking Arabic scanned document support as of February 2026. [github](https://github.com/docling-project/docling/issues/3021)
 
 ***
 
-## Known Conflicts and Fixes
+### 3. MRZ-Specific Libraries
 
-| Error | Cause | Fix |
+For the MRZ zone, use dedicated parsers rather than generic OCR:
+
+| Library | GitHub | Notes |
 |---|---|---|
-| `protobuf` version conflict | onnx needs `>=3.20.2`, paddle needs `<=3.20.0` | `pip install protobuf==3.20.3` — the patch release satisfies both  [github](https://github.com/PaddlePaddle/PaddleOCR/issues/9468) |
-| `numpy.bool` DeprecationError | numpy≥1.24 removed `np.bool` alias | Pin `numpy==1.26.4` (or upgrade to PaddleOCR 3.x)  [github](https://github.com/PaddlePaddle/PaddleOCR/issues/9468) |
-| `cv2.error` at import | Both opencv packages installed | Uninstall both, reinstall only `opencv-contrib-python`  [github](https://github.com/PaddlePaddle/PaddleOCR/issues/11555) |
-| `dnnl::error` / OneDNN crash in Flask | Flask multiprocessing conflicts with Intel OneDNN | Run Flask with `threaded=True, processes=1` (see Flask section)  [giters](https://giters.com/PaddlePaddle/PaddleOCR/issues/3753) |
-| `A module was compiled with a different version` | Python 3.11 + numpy mismatch in 3.x | Use Python 3.10  [github](https://github.com/PaddlePaddle/PaddleOCR/discussions/16341) |
+| `readmrz` | [egemenzeytinci/readmrz](https://github.com/egemenzeytinci/readmrz) | Detects + crops + reads MRZ, pure Python  [github](https://github.com/egemenzeytinci/readmrz) |
+| `mrz` (PyPI) | `pip install mrz` | ICAO 9303 standard, generator + checker for TD1/TD3  [pypi](https://pypi.org/project/mrz/) |
+| `MRZScanner` | [DocsaidLab/MRZScanner](https://github.com/DocsaidLab/MRZScanner) | Trained model for visas, passports, ID cards  [github](https://github.com/DocsaidLab/MRZScanner) |
+
+```python
+# readmrz example
+from readmrz import MrzDetector, MrzReader
+detector = MrzDetector()
+reader = MrzReader()
+image = detector.read('id_card.jpg')
+cropped = detector.crop_area(image)
+result = reader.process(cropped)  # Returns structured dict
+```
+
+MRZ text uses only ASCII characters, so any OCR works reliably on it — the real challenge is detection and cropping.
 
 ***
 
-## ID Card OCR Configuration
+## Cloud APIs (Highest Accuracy, No GPU Required)
 
-### (a) MRZ Lines — OCR-B Latin Font
+For a 9/10+ accuracy bar on Arabic + French, cloud APIs are the safest bet: [research.aimultiple](https://research.aimultiple.com/ocr-accuracy/)
 
-For MRZ, **skip detection entirely**. The lines are perfectly aligned, fixed-width, in OCR-B font. Running the detection model wastes 80% of your inference time on pre-cropped regions.
+| API | Arabic+French Accuracy | MRZ Support | Cost |
+|---|---|---|---|
+| **Mistral OCR 3** | 99%+ on 25+ languages, 96.6% on tables | Via text extraction | Pay-per-use  [jannikreinhard](https://jannikreinhard.com/2026/01/12/master-the-paper-chaos-comparing-azures-ocr-and-document-intelligence-powerhouses/) |
+| **Google Cloud Vision** | ~98% overall, top benchmark performer | Yes (Document Text Detection) | $1.50/1K images  [photes](https://photes.io/blog/posts/ocr-research-trend) |
+| **Azure Document Intelligence** | 96% on printed text | Yes | Pay-per-use  [research.aimultiple](https://research.aimultiple.com/ocr-accuracy/) |
+| **AWS Textract** | ~95%, strong on structured docs | Yes | Pay-per-use  [research.aimultiple](https://research.aimultiple.com/ocr-accuracy/) |
+
+**Mistral OCR** (`mistral-ocr-latest`) is the 2025/2026 standout for Arabic specifically, outperforming traditional OCR tools by 60% CER on Arabic benchmarks: [arxiv](https://arxiv.org/html/2502.14949v1)
 
 ```python
-ocr_mrz = PaddleOCR(
-    use_angle_cls=False,   # MRZ is already horizontal — no need
-    lang='en',             # Latin/OCR-B only
-    use_gpu=False,
-    show_log=False,
-    rec_model_dir='./models/rec/en',   # local path (see pre-download section)
-    det_model_dir='./models/det/en',
-    # Tuned for small crops
-    det_db_thresh=0.3,
-    det_db_box_thresh=0.5,
-    det_db_unclip_ratio=1.5,   # smaller → tighter boxes on pre-cropped
-    rec_batch_num=1,            # single line, batch size 1
+from mistralai import Mistral
+import base64
+
+client = Mistral(api_key="YOUR_API_KEY")
+with open("id_card.jpg", "rb") as f:
+    img_b64 = base64.b64encode(f.read()).decode()
+
+response = client.ocr.process(
+    model="mistral-ocr-latest",
+    document={"type": "image_url", "image_url": f"data:image/jpeg;base64,{img_b64}"}
 )
-
-# For pre-cropped MRZ image, skip detection:
-result = ocr_mrz.ocr(mrz_img, det=False, rec=True, cls=False)
-text = result[0][0][0]  # just the string
-```
-
-For MRZ specifically, also consider the dedicated [`mrz`](https://pypi.org/project/mrz/) library (`pip install mrz`) — it's purpose-built for ICAO TD1/TD3 format parsing with checksum validation, far more reliable than general OCR for this specific task.
-
-### (b) Mixed Arabic + French Text
-
-PaddleOCR 2.x does **not** support mixed scripts in a single model pass. You need two separate instances. PaddleOCR 3.x's PP-OCRv5 supports Arabic script natively in its multilingual model as of 3.3.0. [stackoverflow](https://stackoverflow.com/questions/79540177/paddleocr-ocr-analyzes-left-to-right-instead-of-right-to-left-for-arabic-how-to)
-
-```python
-ocr_latin = PaddleOCR(
-    use_angle_cls=False,
-    lang='en',          # French uses Latin alphabet — 'en' model covers it
-    use_gpu=False,
-    show_log=False,
-    rec_batch_num=6,
-)
-
-ocr_arabic = PaddleOCR(
-    use_angle_cls=False,  # False for pre-aligned, cropped fields
-    lang='ar',
-    use_gpu=False,
-    show_log=False,
-    rec_batch_num=6,
-)
-```
-
-**Important Arabic RTL caveat**: PaddleOCR returns Arabic text in left-to-right word order regardless of language. You must reverse the word order post-recognition: [stackoverflow](https://stackoverflow.com/questions/79540177/paddleocr-ocr-analyzes-left-to-right-instead-of-right-to-left-for-arabic-how-to)
-
-```python
-def fix_arabic_rtl(text: str) -> str:
-    words = text.split()
-    return ' '.join(reversed(words))
-```
-
-### Memory cost of two instances
-
-Each loaded PaddleOCR 2.x mobile model uses ~200–350MB RAM. Two instances (en + ar) = ~500–700MB combined. Server-grade models double that. For Flask on a VPS, mobile models are the right choice.
-
-### `use_angle_cls` decision
-
-| Scenario | Setting |
-|---|---|
-| Pre-cropped, aligned field (known orientation) | `use_angle_cls=False` — saves ~30% inference time |
-| Full ID card image, unknown orientation | `use_angle_cls=True` |
-| MRZ zone (always horizontal) | `use_angle_cls=False` |
-
-### Detection parameters for small crops (~300×50px)
-
-For single-field crops, **the best option is to bypass detection entirely** with `det=False`. If you must detect:
-
-```python
-# These values work well for tight, small crops
-det_db_thresh=0.3          # default; lower to 0.2 if text is missed
-det_db_box_thresh=0.5      # default
-det_db_unclip_ratio=1.5    # smaller than default 2.0 for tight regions
+print(response.pages[0].markdown)
 ```
 
 ***
 
-## Flask: Singleton, Logs, and Pre-Download
+## Lightweight Transformer Models on CPU
 
-### Singleton pattern
+**TrOCR** (Microsoft) runs on CPU but is slow (~5–15s/image) and has no native Arabic support without fine-tuning. The **HATFormer** model (Arabic-specific TrOCR adaptation) achieves strong CER but requires fine-tuning effort. [arxiv](https://arxiv.org/html/2410.02179v2)
 
-Initialize at app start — never inside a request handler: [giters](https://giters.com/PaddlePaddle/PaddleOCR/issues/3753)
-
-```python
-# ocr_service.py
-import os
-import logging
-os.environ['FLAGS_call_stack_level'] = '2'  # reduce paddle C++ verbosity
-
-from paddleocr import PaddleOCR
-
-logging.getLogger('ppocr').setLevel(logging.ERROR)  # suppress ppocr INFO spam
-
-_ocr_latin: PaddleOCR | None = None
-_ocr_arabic: PaddleOCR | None = None
-
-def get_ocr_latin() -> PaddleOCR:
-    global _ocr_latin
-    if _ocr_latin is None:
-        _ocr_latin = PaddleOCR(
-            use_angle_cls=False,
-            lang='en',
-            use_gpu=False,
-            show_log=False,
-            det_model_dir='./models/det/en',
-            rec_model_dir='./models/rec/en',
-            cls_model_dir='./models/cls',
-        )
-    return _ocr_latin
-
-def get_ocr_arabic() -> PaddleOCR:
-    global _ocr_arabic
-    if _ocr_arabic is None:
-        _ocr_arabic = PaddleOCR(
-            use_angle_cls=False,
-            lang='ar',
-            use_gpu=False,
-            show_log=False,
-            det_model_dir='./models/det/ml',
-            rec_model_dir='./models/rec/ar',
-        )
-    return _ocr_arabic
-```
+For a Hugging Face model ready for CPU deployment:
 
 ```python
-# app.py
-from flask import Flask, request, jsonify
-from ocr_service import get_ocr_latin, get_ocr_arabic
-import numpy as np
-import cv2
-
-app = Flask(__name__)
-
-# Warm up at startup — this triggers model loading ONCE
-with app.app_context():
-    get_ocr_latin()
-    get_ocr_arabic()
-
-@app.route('/ocr/mrz', methods=['POST'])
-def ocr_mrz():
-    file = request.files['image']
-    img = cv2.imdecode(np.frombuffer(file.read(), np.uint8), cv2.IMREAD_COLOR)
-    result = get_ocr_latin().ocr(img, det=False, rec=True, cls=False)
-    lines = [item[0] for item in result[0]] if result[0] else []
-    return jsonify({'lines': lines})
-
-@app.route('/ocr/arabic', methods=['POST'])
-def ocr_arabic_field():
-    file = request.files['image']
-    img = cv2.imdecode(np.frombuffer(file.read(), np.uint8), cv2.IMREAD_COLOR)
-    result = get_ocr_arabic().ocr(img, det=True, rec=True, cls=False)
-    texts = []
-    if result[0]:
-        for box, (text, score) in result[0]:
-            words = text.split()
-            texts.append(' '.join(reversed(words)))  # fix RTL
-    return jsonify({'texts': texts})
-
-if __name__ == '__main__':
-    # Single process — critical to avoid OneDNN/Flask multiprocess crash
-    app.run(host='0.0.0.0', port=5000, threaded=True, processes=1)
+# Qwen2-VL-2B — small VLM, decent Arabic OCR, CPU-runnable (slow ~20-60s)
+from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+model = Qwen2VLForConditionalGeneration.from_pretrained("Qwen/Qwen2-VL-2B-Instruct")
 ```
 
-### Suppressing startup logs
-
-Three layers of suppression are needed — Paddle logs come from both Python and C++: [blog.csdn](https://blog.csdn.net/u013066730/article/details/121423704)
-
-```python
-import os
-import logging
-
-# 1. Suppress C++ Paddle glog output
-os.environ['FLAGS_call_stack_level'] = '2'
-os.environ['GLOG_v'] = '0'
-os.environ['GLOG_logtostderr'] = '0'
-
-# 2. Suppress Python logging
-logging.getLogger('ppocr').setLevel(logging.ERROR)
-logging.getLogger('paddle').setLevel(logging.ERROR)
-
-# 3. show_log=False in constructor
-ocr = PaddleOCR(use_angle_cls=False, lang='en', use_gpu=False, show_log=False)
-```
-
-For the remaining C++ IR optimization logs (`Fused 0 subgraphs`, `skip [feed]`), you need to patch PaddleOCR's `utility.py`: [blog.csdn](https://blog.csdn.net/u013066730/article/details/121423704)
-
-```python
-# In venv/Lib/site-packages/paddleocr/tools/infer/utility.py
-# Find this block and uncomment config.disable_glog_info():
-config.enable_memory_optim()
-config.disable_glog_info()           # ← uncomment this line
-config.switch_ir_optim(False)        # ← change True to False
-```
-
-### Pre-downloading models (prevent runtime downloads)
-
-Run this **once** before deploying to production:
-
-```python
-# preload_models.py — run once to cache all models locally
-from paddleocr import PaddleOCR
-
-print("Downloading English/Latin models...")
-PaddleOCR(use_angle_cls=False, lang='en', use_gpu=False, show_log=False)
-
-print("Downloading Arabic models...")
-PaddleOCR(use_angle_cls=False, lang='ar', use_gpu=False, show_log=False)
-
-print("Done. Models cached at: C:/Users/<you>/.paddleocr/")
-```
-
-To point Flask to a local model directory (offline deployment):
-
-```python
-ocr = PaddleOCR(
-    det_model_dir='C:/myapp/models/det/en_PP-OCRv3_det_infer',
-    rec_model_dir='C:/myapp/models/rec/en_PP-OCRv4_rec_infer',
-    cls_model_dir='C:/myapp/models/cls/ch_ppocr_mobile_v2.0_cls_infer',
-    lang='en',
-    use_gpu=False,
-    show_log=False,
-)
-```
-
-The model folders are at `C:\Users\<you>\.paddleocr\whl\` after first download.
+Modern VLMs (GPT-4o, Gemini, Qwen) outperform traditional OCR tools by **60% CER** on Arabic benchmarks, but they're either API-only or slow on CPU. [arxiv](https://arxiv.org/html/2502.14949v2)
 
 ***
 
-## Complete Minimal Script
+## ONNX / Quantized Models for CPU Speed
+
+- **PaddleOCR ONNX**: The HuggingFace repo [`monkt/paddleocr-onnx`](https://huggingface.co/monkt/paddleocr-onnx) provides ONNX-converted PaddleOCR models for production CPU deployment without PaddlePaddle dependency conflicts [huggingface](https://huggingface.co/monkt/paddleocr-onnx)
+- **PP-OCRv2** (lightweight backbone LCNet) was specifically designed for ultra-lightweight CPU inference — 7% better precision than PP-OCR at the same inference cost [arxiv](https://arxiv.org/pdf/2109.03144.pdf)
+
+```bash
+pip install onnxruntime  # CPU-only, no CUDA needed
+# Use monkt/paddleocr-onnx for drop-in replacement
+```
+
+***
+
+## Arabic OCR Preprocessing Pipeline
+
+This is where you gain the most accuracy — models + preprocessing are what separate 7/10 from 9/10+: [linkedin](https://www.linkedin.com/posts/ramzy-kemmoun-1a3725237_arabicocr-deeplearning-imageprocessing-activity-7397377919339110402-B0BO)
+
+1. **Deskew & orientation correction** — ensures text lines are horizontal (use `opencv-python` + Hough transform or `deskew` library)
+2. **Noise removal** — Median filter or bilateral Gaussian blur to remove scan artifacts
+3. **Adaptive thresholding** — `cv2.adaptiveThreshold` with Gaussian method outperforms global binarization for varying-light ID scans
+4. **ROI cropping** — isolate Arabic text zones from French zones and MRZ zone separately, then feed each region to its OCR engine
+5. **Contrast enhancement** — CLAHE (Contrast Limited Adaptive Histogram Equalization) via `cv2.createCLAHE()`
+6. **Resolution upscaling** — resize to minimum 300 DPI equivalent before OCR (upscale if source is low-res)
 
 ```python
-"""
-Minimal PaddleOCR script — Track A (paddleocr==2.7.3, paddlepaddle==2.6.1)
-Usage: python ocr_minimal.py path/to/image.jpg
-"""
-import os
-import sys
-import logging
-
-# Silence before any paddle imports
-os.environ['FLAGS_call_stack_level'] = '2'
-os.environ['GLOG_v'] = '0'
-logging.getLogger('ppocr').setLevel(logging.ERROR)
-
 import cv2
 import numpy as np
-from paddleocr import PaddleOCR
 
-def build_ocr(lang: str = 'en') -> PaddleOCR:
-    return PaddleOCR(
-        use_angle_cls=False,
-        lang=lang,
-        use_gpu=False,
-        show_log=False,
-        rec_batch_num=6,
-        det_db_thresh=0.3,
-        det_db_box_thresh=0.5,
-    )
-
-# Initialize ONCE
-ocr_en = build_ocr('en')
-ocr_ar = build_ocr('ar')
-
-def run_ocr(image_path: str, lang: str = 'en', skip_det: bool = False):
-    img = cv2.imread(image_path)
-    if img is None:
-        raise FileNotFoundError(f"Cannot open: {image_path}")
-
-    engine = ocr_en if lang == 'en' else ocr_ar
-    result = engine.ocr(img, det=not skip_det, rec=True, cls=False)
-
-    lines = []
-    if result and result[0]:
-        for item in result[0]:
-            if skip_det:
-                text, score = item[0], item [pypi](https://pypi.org/project/paddleocr/)
-            else:
-                _, (text, score) = item
-            lines.append({'text': text, 'score': round(score, 4)})
-    return lines
-
-if __name__ == '__main__':
-    path = sys.argv [pypi](https://pypi.org/project/paddleocr/) if len(sys.argv) > 1 else 'test.jpg'
-
-    print("=== Latin/MRZ (no detection) ===")
-    for item in run_ocr(path, lang='en', skip_det=True):
-        print(f"  {item['text']} ({item['score']})")
-
-    print("\n=== Arabic (with detection) ===")
-    for item in run_ocr(path, lang='ar', skip_det=False):
-        words = item['text'].split()
-        rtl_text = ' '.join(reversed(words))
-        print(f"  {rtl_text} ({item['score']})")
+def preprocess_id_card(img_path):
+    img = cv2.imread(img_path)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    enhanced = clahe.apply(gray)
+    denoised = cv2.medianBlur(enhanced, 3)
+    binary = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                    cv2.THRESH_BINARY, 11, 2)
+    return binary
 ```
 
 ***
 
-## OCR Tool Comparison for ID Cards
+## Recommended Architecture for Your Use Case
 
-| Tool | MRZ Accuracy | Arabic | French | Install Size | CPU Speed | Verdict |
-|---|---|---|---|---|---|---|
-| **PaddleOCR** | Good (needs tuning) | ✅ `lang='ar'` | ✅ `lang='en'` | ~1.5GB | 100–300ms | Best all-rounder |
-| **EasyOCR** | Good | ✅ native RTL | ✅ | ~1.2GB | 400–800ms | Better Arabic accuracy  [tildalice](https://tildalice.io/ocr-tesseract-easyocr-paddleocr-benchmark/) |
-| **Tesseract** | Excellent (OCR-B trained) | ⚠️ poor | ✅ | ~50MB | ~50ms | Best for MRZ only |
-| **`mrz` library** | Excellent + checksum | N/A (MRZ only) | N/A | ~5MB | <10ms | **Use this for MRZ** |
+Given your context (Moroccan ID cards, Arabic + French, CPU-only, 9/10 accuracy target):
 
-**Recommended hybrid strategy for Moroccan ID cards:**
-- Use [`mrz`](https://pypi.org/project/mrz/) (`pip install mrz`) for the MRZ zone — it validates TD1/TD3 checksums automatically
-- Use PaddleOCR with `lang='ar'` for the Arabic body fields
-- Use PaddleOCR with `lang='en'` (or EasyOCR) for French fields
+```
+Image Input
+    ↓
+Preprocessing (OpenCV: deskew, CLAHE, denoise)
+    ↓
+Zone Detection (split Arabic / French / MRZ regions)
+    ↓
+┌─────────────────────────────────────┐
+│  Arabic zones → Mistral OCR API     │  ← 99%+ accuracy
+│  French zones → Surya OCR (CPU)     │  ← 97% similarity
+│  MRZ zone    → readmrz library      │  ← near 100% with good crop
+└─────────────────────────────────────┘
+    ↓
+JSON structured output
+```
 
-***
-
-## Performance
-
-CPU inference times on a ~300×50px crop (Windows, no GPU): [tildalice](https://tildalice.io/ocr-tesseract-easyocr-paddleocr-benchmark/)
-
-| Config | Det + Rec | Rec Only (skip det) |
-|---|---|---|
-| PP-OCRv3 mobile | ~150–250ms | ~30–60ms |
-| PP-OCRv4 mobile | ~200–350ms | ~40–80ms |
-| Two instances initialized | +0ms (singleton) | — |
-
-Model memory footprint (loaded into RAM):
-
-| Model | Disk | RAM |
-|---|---|---|
-| Mobile detection (en) | ~2.4MB | ~80MB |
-| Mobile recognition (en) | ~4.8MB | ~120MB |
-| Mobile recognition (ar) | ~4.8MB | ~120MB |
-| Total (en + ar, no cls) | ~12MB | ~400MB |
-
-To get faster inference, skip detection on pre-cropped fields (`det=False`) — that alone cuts latency by ~60–70% for small crops. There are no official quantized/INT8 lite models for CPU in the Python pip package; ONNX Runtime export is available in PaddleOCR 3.x for further acceleration. [pypi](https://pypi.org/project/paddleocr/)
+If fully offline is required, use **Surya OCR for all text** + `readmrz` for MRZ. If you can accept API calls, **Mistral OCR** is the highest-accuracy Arabic solution available in 2025/2026. [jannikreinhard](https://jannikreinhard.com/2026/01/12/master-the-paper-chaos-comparing-azures-ocr-and-document-intelligence-powerhouses/)
