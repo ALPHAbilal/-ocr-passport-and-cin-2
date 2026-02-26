@@ -1,6 +1,7 @@
 # Virtual environments
 ocr_env/
 venv/
+venv311/
 env/
 .venv/
 

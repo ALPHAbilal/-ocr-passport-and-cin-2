@@ -1,0 +1,32 @@
+Loading foundation model...
+---------------------------------------------------------------------------
+AttributeError                            Traceback (most recent call last)
+Cell In[14], line 6
+      4 print("Loading foundation model...")
+      5 t0 = time.time()
+----> 6 foundation_predictor = FoundationPredictor()
+      7 print(f"Foundation model loaded ({time.time()-t0:.1f}s)")
+      9 print("Loading detection model...")
+
+File c:\Users\User004\AppData\Local\Programs\Python\Python313\Lib\site-packages\surya\foundation\__init__.py:113, in FoundationPredictor.__init__(self, checkpoint, device, dtype, attention_implementation)
+    106 def __init__(
+    107     self,
+    108     checkpoint=None,
+   (...)    111     attention_implementation: Optional[str] = None,
+    112 ):
+--> 113     super().__init__(checkpoint, device, dtype, attention_implementation)
+    114     self.prompt_queue = deque()
+    115     self.batch_prompt_mapping = None
+
+File c:\Users\User004\AppData\Local\Programs\Python\Python313\Lib\site-packages\surya\common\predictor.py:37, in BasePredictor.__init__(self, checkpoint, device, dtype, attention_implementation)
+     34 self.processor = None
+     35 loader = self.model_loader_cls(checkpoint)
+---> 37 self.model = loader.model(device, dtype, attention_implementation)
+     38 self.processor = loader.processor()
+     40 self._disable_tqdm = settings.DISABLE_TQDM
+...
+    162 if key != "attribute_map" and key in super().__getattribute__("attribute_map"):
+    163     key = super().__getattribute__("attribute_map")[key]
+--> 164 return super().__getattribute__(key)
+
+AttributeError: 'SuryaDecoderConfig' object has no attribute 'pad_token_id'
