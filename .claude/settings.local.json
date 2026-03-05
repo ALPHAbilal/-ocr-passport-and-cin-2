@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:qwen.readthedocs.io)",
+      "WebFetch(domain:unsloth.ai)"
+    ]
+  }
+}
