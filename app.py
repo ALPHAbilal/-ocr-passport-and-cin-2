@@ -1,21 +1,21 @@
 """
 Flask OCR Extraction API
 
-POST /extract — accepts image upload, runs card detection + PaddleOCR (Arabic + French).
+POST /extract — accepts image upload, runs card detection + single-pass OCR.
 """
 
 import time
 
-print("[1/4] Importing libraries...")
+print("[1/3] Importing libraries...")
 import cv2
 from flask import Flask, request, jsonify
 
-print("[2/4] Loading preprocessor...")
+print("[2/3] Loading preprocessor...")
 from services.preprocessor import preprocess_card
 
-print("[3/4] Loading OCR models (this takes a while on first run)...")
+print("[3/3] Loading OCR model (this takes a while on first run)...")
 from services.ocr_engine import run_ocr
-print("[4/4] All models loaded!")
+print("All models loaded!")
 
 app = Flask(__name__)
 
@@ -32,17 +32,10 @@ def extract():
     if file.filename == "":
         return jsonify({"success": False, "error": "Empty filename"}), 400
 
-    preprocess_mode = request.form.get("preprocess", "raw")
-    if preprocess_mode not in ("raw", "upscale_2x"):
-        return jsonify({
-            "success": False,
-            "error": f"Invalid preprocess mode '{preprocess_mode}'. Use 'raw' or 'upscale_2x'."
-        }), 422
-
-    # --- Step 1: Card detection + perspective warp (existing preprocessor) ---
-    print(f"\n>> New request: file='{file.filename}', preprocess='{preprocess_mode}'")
+    # --- Step 1: Card detection + perspective warp ---
+    print(f"\n>> New request: file='{file.filename}'")
     image_bytes = file.read()
-    print(f"   [1/3] Card detection + warp... ({len(image_bytes)} bytes)")
+    print(f"   [1/2] Card detection + warp... ({len(image_bytes)} bytes)")
     card_result = preprocess_card(image_bytes)
 
     if not card_result["success"]:
@@ -56,33 +49,27 @@ def extract():
     card_debug = card_result["debug"]
     print(f"   Card: {card_debug.get('detection', '?')} -> {card_image.shape[1]}x{card_image.shape[0]}")
 
-    # --- Step 2: Apply preprocessing mode ---
-    if preprocess_mode == "upscale_2x":
-        card_image = cv2.resize(card_image, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        print(f"   Upscaled to {card_image.shape[1]}x{card_image.shape[0]}")
-
-    # --- Step 3: Run OCR (both languages on full image) ---
-    print("   [2/3] Running Arabic OCR...")
-    ar_results = run_ocr(card_image, "ar")
-    print(f"   Arabic: {ar_results['regions_found']} regions in {ar_results['time_ms']}ms")
-
-    print("   [3/3] Running French OCR...")
-    fr_results = run_ocr(card_image, "fr")
-    print(f"   French: {fr_results['regions_found']} regions in {fr_results['time_ms']}ms")
+    # --- Step 2: Single-pass OCR (Arabic model reads both scripts) ---
+    # Enhancement (2x upscale, CLAHE, unsharp mask) happens inside run_ocr
+    print("   [2/2] Running OCR (single pass, enhanced)...")
+    results = run_ocr(card_image)
+    print(f"   OCR: {results['regions_found']} regions in {results['time_ms']}ms")
 
     total_ms = round((time.time() - total_start) * 1000, 1)
     print(f"   DONE in {total_ms}ms")
 
     return jsonify({
-        "arabic": [{"text": d["text"], "confidence": d["confidence"]} for d in ar_results["detections"]],
-        "french": [{"text": d["text"], "confidence": d["confidence"]} for d in fr_results["detections"]],
+        "detections": [
+            {"text": d["text"], "confidence": d["confidence"]}
+            for d in results["detections"]
+        ],
     })
 
 
 if __name__ == "__main__":
     print("=" * 50)
     print("CNIE OCR Extraction API")
-    print("POST /extract — image file + preprocess param")
+    print("POST /extract — send image, get OCR text")
     print("http://localhost:5000/extract")
     print("=" * 50)
     app.run(host="0.0.0.0", port=5000, debug=False)
