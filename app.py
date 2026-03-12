@@ -106,7 +106,7 @@ def extract():
         }), 422
 
     # --- Step 5: City Arabic lookup ---
-    fields = fix_city_arabic(fields)
+    fields = fix_city_arabic(fields, detections=filtered)
     log_step("City lookup", f"birth_place_ar → {fields.get('birth_place_ar', 'N/A')}")
 
     total_ms = round((time.time() - total_start) * 1000, 1)
@@ -115,6 +115,11 @@ def extract():
     return jsonify({
         "success": True,
         "fields": fields,
+        "ocr_detections": raw_detections,
+        "llm_prompt": {
+            "system": llm_result["prompt_system"],
+            "user": llm_result["prompt_user"],
+        },
         "steps": steps,
         "total_ms": total_ms,
     })

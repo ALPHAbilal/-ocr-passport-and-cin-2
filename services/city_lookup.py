@@ -67,12 +67,26 @@ _CITY_MAP = {
 }
 
 
-def fix_city_arabic(fields):
+def fix_city_arabic(fields, detections=None):
     """
     Override birth_place_ar with correct Arabic if birth_place_fr is a known city.
+    Also fixes birth_place_fr if LLM accidentally put Arabic text in it.
     Modifies fields dict in place and returns it.
     """
     city_fr = (fields.get("birth_place_fr") or "").strip().upper()
+
+    # If birth_place_fr contains Arabic, try to find the real French city from OCR
+    if city_fr and any("\u0600" <= ch <= "\u06ff" for ch in city_fr):
+        city_fr = ""
+        if detections:
+            for d in detections:
+                text = d["text"].strip()
+                # Look for "a CITYNAME" pattern in OCR detections
+                if text.lower().startswith("a ") and not any("\u0600" <= ch <= "\u06ff" for ch in text):
+                    city_fr = text[2:].strip().upper()
+                    fields["birth_place_fr"] = city_fr
+                    break
+
     if city_fr in _CITY_MAP:
         fields["birth_place_ar"] = _CITY_MAP[city_fr]
     return fields

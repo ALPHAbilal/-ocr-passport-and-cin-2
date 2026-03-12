@@ -15,23 +15,30 @@ from llama_cpp import Llama
 _REPO = "bartowski/Phi-3.5-mini-instruct-GGUF"
 _FILE = "Phi-3.5-mini-instruct-Q4_K_M.gguf"
 
+# Original notebook prompt (9/10) with surgical fixes:
+# - "Copy exactly" added (model was translating Arabic↔French)
+# - "French more reliable" removed (caused model to skip Arabic)
+# - Expanded IGNORE list (OCR variants seen in production)
 _SYSTEM_PROMPT = """You extract personal data from Moroccan CNIE card OCR output.
 
-FIELDS:
-- last_name_fr / last_name_ar: family name (French UPPERCASE)
-- first_name_fr / first_name_ar: given name (French UPPERCASE)
+
+
+NAMES: the card contains frensh and arabic of the same person so extract them in both language and as they are should be preserved from the input that you will recive next.
+
+OTHER FIELDS:
 - birth_date: DD.MM.YYYY
-- birth_place_fr: city UPPERCASE
-- birth_place_ar: correct Arabic for the city (translate from French, don't copy OCR)
+- birth_place_fr: place where it born in frensh
+- birth_place_ar: place where it born in arabic
 - expiry_date: DD.MM.YYYY
-- card_number: letters + digits
+- card_number: 1-2 letters + 5-6 digits
 - gender: M or F
 
 RULES:
-- French text is more reliable than Arabic for names/places
 - Fix OCR errors: 1→I, 0→O, 7→T in names/places
-- Return null (not "null") for missing fields
-- Return ONLY valid JSON, no explanation."""
+- Return ONLY JSON, no explanation.
+
+Example output:
+{"last_name_fr": "ALAOUI", "first_name_fr": "MOHAMMED", "last_name_ar": "العلوي", "first_name_ar": "محمد", "birth_date": "15.06.1990", "birth_place_fr": "CASABLANCA", "birth_place_ar": "الدار البيضاء", "card_number": "CD987654", "expiry_date": "20.06.2030", "gender": "M"}"""
 
 # --- Load model at import time ---
 print("Downloading Phi-3.5-mini GGUF (first run only)...")
@@ -51,18 +58,22 @@ _llm = Llama(
 print(f"LLM loaded ({time.time() - _t0:.1f}s)")
 
 
+def _is_arabic(text):
+    """Check if text contains Arabic characters."""
+    for ch in text:
+        if "\u0600" <= ch <= "\u06ff" or "\u0750" <= ch <= "\u077f" or "\ufb50" <= ch <= "\ufdff" or "\ufe70" <= ch <= "\ufeff":
+            return True
+    return False
+
+
 def _format_detections(detections):
-    """Format filtered OCR detections into text for the LLM."""
-    lines = ["OCR detections:"]
-    for d in detections:
-        lines.append(f"  - text: '{d['text']}', confidence: {d['confidence']}")
-    return "\n".join(lines)
+    """Raw text, one per line, original spatial order."""
+    return "\n".join(d["text"] for d in detections)
 
 
 def _parse_json(raw):
     """Extract JSON from LLM response, handling wrapper text."""
     cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-    # Try full string first, then regex extraction
     for candidate in [
         cleaned,
         re.search(r"\{[^{}]*\}", cleaned, re.DOTALL),
@@ -118,4 +129,6 @@ def extract_fields(detections):
         "tokens_in": usage.get("prompt_tokens", 0),
         "tokens_out": usage.get("completion_tokens", 0),
         "raw": raw,
+        "prompt_system": _SYSTEM_PROMPT,
+        "prompt_user": f"Extract fields:\n\n{ocr_text}",
     }

@@ -1,71 +1,19 @@
-  failed with:
+Extract fields:
 
-         no such file or directory
-
-
-      CMake Error: CMAKE_C_COMPILER not set, after EnableLanguage
-      CMake Error: CMAKE_CXX_COMPILER not set, after EnableLanguage
-      -- Configuring incomplete, errors occurred!
-
-      *** CMake configuration failed
-      [end of output]
-
-  note: This error originates from a subprocess, and is likely not a problem with pip.
-  ERROR: Failed building wheel for llama-cpp-python
-Failed to build llama-cpp-python
-
-[notice] A new release of pip is available: 24.3.1 -> 26.0.1
-[notice] To update, run: python.exe -m pip install --upgrade pip
-ERROR: ERROR: Failed to build installable wheels for some pyproject.toml based projects (llama-cpp-python)
-(venv) PS E:\-ocr-passport-and-cin-2>  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu       
-Looking in indexes: https://pypi.org/simple, https://abetlen.github.io/llama-cpp-python/whl/cpu
-Collecting llama-cpp-python
-  Using cached llama_cpp_python-0.3.16.tar.gz (50.7 MB)
-  Installing build dependencies ... done
-  Getting requirements to build wheel ... done
-  Installing backend dependencies ... done
-  Preparing metadata (pyproject.toml) ... done
-Requirement already satisfied: typing-extensions>=4.5.0 in e:\-ocr-passport-and-cin-2\venv\lib\site-packages (from llama-cpp-python) (4.15.0)
-Requirement already satisfied: numpy>=1.20.0 in e:\-ocr-passport-and-cin-2\venv\lib\site-packages (from llama-cpp-python) (2.4.3)
-Collecting diskcache>=5.6.1 (from llama-cpp-python)
-  Using cached diskcache-5.6.3-py3-none-any.whl.metadata (20 kB)
-Requirement already satisfied: jinja2>=2.11.3 in e:\-ocr-passport-and-cin-2\venv\lib\site-packages (from llama-cpp-python) (3.1.6)
-Requirement already satisfied: MarkupSafe>=2.0 in e:\-ocr-passport-and-cin-2\venv\lib\site-packages (from jinja2>=2.11.3->llama-cpp-python) (3.0.3)
-Using cached diskcache-5.6.3-py3-none-any.whl (45 kB)
-Building wheels for collected packages: llama-cpp-python
-  Building wheel for llama-cpp-python (pyproject.toml) ... error
-  error: subprocess-exited-with-error
-
-  × Building wheel for llama-cpp-python (pyproject.toml) did not run successfully.
-  │ exit code: 1
-  ╰─> [20 lines of output]
-      *** scikit-build-core 0.12.2 using CMake 4.2.3 (wheel)
-      *** Configuring CMake...
-      2026-03-12 11:32:19,403 - scikit_build_core - WARNING - Can't find a Python library, got libdir=None, ldlibrary=None, multiarch=None, masd=None
-      loading initial cache file C:\Users\Bilal\AppData\Local\Temp\tmp50pgm480\build\CMakeInit.txt
-      -- Building for: NMake Makefiles
-      CMake Error at CMakeLists.txt:3 (project):
-        Running
-
-         'nmake' '-?'
-
-        failed with:
-
-         no such file or directory
-
-
-      CMake Error: CMAKE_C_COMPILER not set, after EnableLanguage
-      CMake Error: CMAKE_CXX_COMPILER not set, after EnableLanguage
-      -- Configuring incomplete, errors occurred!
-
-      *** CMake configuration failed
-      [end of output]
-
-  note: This error originates from a subprocess, and is likely not a problem with pip.
-  ERROR: Failed building wheel for llama-cpp-python
-Failed to build llama-cpp-python
-
-[notice] A new release of pip is available: 24.3.1 -> 26.0.1
-[notice] To update, run: python.exe -m pip install --upgrade pip
-ERROR: ERROR: Failed to build installable wheels for some pyproject.toml based projects (llama-cpp-python)
-(venv) PS E:\-ocr-passport-and-cin-2> 
+OCR detections:
+  'ROYAUME DU MAROC' (0.9798) | 'المغربية' (0.9674)
+  'المملكة' (0.9392) | 'CARTE NATIONALE D'IDENTITE' (0.9956)
+  'للتعريف' (0.9948)
+  'البطاقة الوطنية' (0.9896)
+  'محسن' (0.9301) | 'MOUHCINE' (0.9998)
+  'التمسماتي' (0.8767) | 'TEMSAMANI' (0.9649)
+  'Nele' (0.9788)
+  '29.11.1978' (0.9887) | 'مزداد بتاريخ' (0.8419)
+  'ب طنجة اصيلة  طنجة' (0.9266) | 'a TANGER ASSILAH - TANGER' (0.9638)
+  'ROC' (0.6128)
+  '*' (0.8554)
+  '19' (0.993)
+  '78' (0.9979)
+  'No' (0.7486)
+  'K01234567' (0.9934) | 'رقم' (0.9779)
+  'Valable jusqu'au 09.09.2029' (0.9736) | 'صالحة إلى غاية' (0.9372)
