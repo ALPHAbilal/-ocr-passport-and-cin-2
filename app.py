@@ -15,7 +15,7 @@ import time
 
 print("[1/4] Importing libraries...")
 import cv2
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 
 print("[2/4] Loading preprocessor...")
 from services.preprocessor import preprocess_card
@@ -31,6 +31,11 @@ from services.city_lookup import fix_city_arabic
 print("All models loaded!")
 
 app = Flask(__name__)
+
+
+@app.route("/")
+def index():
+    return render_template("index.html")
 
 
 @app.route("/extract", methods=["POST"])
@@ -119,6 +124,7 @@ if __name__ == "__main__":
     print("=" * 50)
     print("CNIE OCR + LLM Extraction API")
     print("POST /extract — send image, get structured fields")
-    print("http://localhost:5000/extract")
+    print("GET  /         — web interface")
+    print("http://localhost:5000")
     print("=" * 50)
     app.run(host="0.0.0.0", port=5000, debug=False)
