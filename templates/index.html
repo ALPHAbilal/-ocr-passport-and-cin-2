@@ -126,6 +126,8 @@
     margin-top: 16px;
     width: 100%;
     max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
     padding: 12px;
     background: #6b4c30;
     color: #faf6f0;
@@ -180,8 +182,29 @@
     display: none;
     margin-top: 28px;
     width: 100%;
-    max-width: 420px;
+    max-width: 100%;
+    padding: 0 20px;
   }
+
+  .models-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+  }
+
+  @media (max-width: 1400px) {
+    .models-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  @media (max-width: 960px) {
+    .models-grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  @media (max-width: 600px) {
+    .models-grid { grid-template-columns: 1fr; }
+  }
+
+  .model-col { min-width: 0; }
 
   .result-card {
     background: #faf6f0;
@@ -219,9 +242,9 @@
   .field-row:last-child { border-bottom: none; }
 
   .field-label {
-    width: 130px;
+    width: 110px;
     flex-shrink: 0;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: #8a7262;
     text-transform: uppercase;
     letter-spacing: 0.3px;
@@ -537,9 +560,14 @@ const FIELD_ORDER = [
   { key: 'gender', label: 'Gender' },
 ];
 
-function renderResult(data) {
-  const fields = data.fields || {};
-  const time = data.total_ms ? (data.total_ms / 1000).toFixed(1) + 's' : '';
+function esc(s) {
+  return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
+}
+
+function renderModelCard(key, result) {
+  const fields = result.fields || {};
+  const label = result.label || key;
+  const time = result.time_ms ? (result.time_ms / 1000).toFixed(1) + 's' : '';
 
   let rows = '';
   FIELD_ORDER.forEach(f => {
@@ -552,7 +580,64 @@ function renderResult(data) {
     </div>`;
   });
 
-  // OCR detections section
+  // Prompt section per model
+  let promptHtml = '';
+  if (result.prompt_user) {
+    const sysBlock = result.prompt_system
+      ? `<div class="prompt-label">System</div><div class="prompt-text">${esc(result.prompt_system)}</div><hr class="prompt-divider">`
+      : '';
+    promptHtml = `<div class="prompt-section">
+      <button class="prompt-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+        <span>Prompt</span><span class="arrow">&#9660;</span>
+      </button>
+      <div class="prompt-content">
+        ${sysBlock}
+        <div class="prompt-label">User</div>
+        <div class="prompt-text">${esc(result.prompt_user)}</div>
+      </div>
+    </div>`;
+  }
+
+  // Raw LLM output
+  let rawHtml = '';
+  if (result.raw) {
+    rawHtml = `<div class="prompt-section">
+      <button class="prompt-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+        <span>Raw Output</span><span class="arrow">&#9660;</span>
+      </button>
+      <div class="prompt-content">
+        <div class="prompt-text">${esc(result.raw)}</div>
+      </div>
+    </div>`;
+  }
+
+  return `<div class="model-col">
+    <div class="result-card">
+      <div class="result-header">
+        <span>${label}</span>
+        <span class="result-time">${time}</span>
+      </div>
+      <div class="result-body">${rows}</div>
+    </div>
+    ${promptHtml}${rawHtml}
+  </div>`;
+}
+
+function renderResult(data) {
+  const totalTime = data.total_ms ? (data.total_ms / 1000).toFixed(1) + 's' : '';
+  const models = data.models || {};
+  const modelKeys = Object.keys(models);
+
+  // Model result cards
+  let modelsHtml = '';
+  if (modelKeys.length > 0) {
+    const cards = modelKeys.map(k => renderModelCard(k, models[k])).join('');
+    modelsHtml = modelKeys.length > 1
+      ? `<div class="models-grid">${cards}</div>`
+      : cards;
+  }
+
+  // OCR detections
   let ocrHtml = '';
   const detections = data.ocr_detections || [];
   if (detections.length) {
@@ -566,7 +651,7 @@ function renderResult(data) {
         <span class="ocr-conf">${pct}</span>
       </div>`;
     });
-    ocrHtml = `<div class="ocr-section">
+    ocrHtml = `<div class="ocr-section" style="max-width:420px">
       <button class="ocr-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
         <span>Raw OCR Detections (${detections.length})</span>
         <span class="arrow">&#9660;</span>
@@ -575,33 +660,8 @@ function renderResult(data) {
     </div>`;
   }
 
-  // LLM prompt section
-  let promptHtml = '';
-  const prompt = data.llm_prompt;
-  if (prompt) {
-    const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    promptHtml = `<div class="prompt-section">
-      <button class="prompt-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
-        <span>LLM Prompt (what the model sees)</span>
-        <span class="arrow">&#9660;</span>
-      </button>
-      <div class="prompt-content">
-        <div class="prompt-label">System</div>
-        <div class="prompt-text">${esc(prompt.system)}</div>
-        <hr class="prompt-divider">
-        <div class="prompt-label">User</div>
-        <div class="prompt-text">${esc(prompt.user)}</div>
-      </div>
-    </div>`;
-  }
-
-  resultDiv.innerHTML = `<div class="result-card">
-    <div class="result-header">
-      <span>Extracted Fields</span>
-      <span class="result-time">${time}</span>
-    </div>
-    <div class="result-body">${rows}</div>
-  </div>${ocrHtml}${promptHtml}`;
+  resultDiv.innerHTML = `<p style="font-size:0.75rem;color:#8a7262;margin-bottom:12px">Total: ${totalTime}</p>
+    ${modelsHtml}${ocrHtml}`;
   resultDiv.style.display = 'block';
 }
 

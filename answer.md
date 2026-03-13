@@ -1,212 +1,267 @@
-Short answer: among 2025–2026 releases, the only model that is very likely to be a **strict upgrade over Phi‑3.5‑mini‑instruct** for your CNIE-style Arabic+French JSON extraction (under your RAM/CPU constraints) is **Phi‑4‑mini‑instruct** in Q4\_K\_M GGUF. Gemma‑3‑4B‑it and Ministral‑3‑3B‑Instruct are strong multilingual alternatives worth testing, but based on published Arabic benchmarks and training details they are *not clearly* superior to Phi‑4‑mini for noisy Arabic OCR extraction; SmolLM3‑3B is probably *weaker* than Phi‑3.5‑mini for Arabic. [huggingface](https://huggingface.co/ggml-org/SmolLM3-3B-GGUF)
+# Prompting Small LLMs (Phi‑3.5‑Mini and Similar) for Structured Extraction and Line‑Number Mapping
 
-Below I go model by model with exactly what you asked for.
+## Executive summary
 
-***
+Multiple engineering teams have successfully used small models (around 3–4B parameters) such as Phi‑3.5‑mini‑instruct and NuExtract‑1.5 (a Phi‑3.5‑mini fine‑tune) for document→JSON extraction, often in combination with OCR.  Common patterns are: (1) very explicit JSON instructions, (2) schema or grammar constraints, and (3) line‑number encoding in the input plus a schema that asks only for indices, not text.  The examples below show concrete prompts and code patterns you can adapt directly to your CNIE pipeline.[1][2][3][4][5][6]
 
-## 1. Phi‑4‑mini‑instruct
 
-### Availability & repos
+## Phi‑3.5‑mini‑instruct: official text‑chunking prompt (JSON output)
 
-- Base model: `microsoft/Phi-4-mini-instruct` (3.8B, 128K context, new 200K vocab). [huggingface](https://huggingface.co/microsoft/Phi-4-mini-instruct)
-- GGUF: `Mungert/Phi-4-mini-instruct.gguf` (multiple quantizations including `phi-4-mini-q4_k_m.gguf`, compatible with llama.cpp / llama-cpp-python). [huggingface](https://huggingface.co/Mungert/Phi-4-mini-instruct.gguf)
+A Microsoft TechCommunity article demonstrates using **Phi‑3.5‑mini‑instruct** to split arbitrary text into JSON chunks, with a prompt that small models follow reliably.[2]
 
-### Language & Arabic benchmarks
+> You are an expert in content chunking. Please help me chunk user's input text according to the following requirements  
+> 1. Truncate the text content into chunks of no more than 300 tokens.  
+> 2. Each chunk part should maintain contextual coherence. The truncated content should be retained in its entirety without any additions or modifications.  
+> 3. Each chunked part is output JSON format { "chunking": "..." }  
+> 4. The final output is a JSON array [{ "chunking" : "..." },{ "chunking" :"..."},{ "chunking" : "..."} ....]
 
-- Microsoft expanded the vocab to **200k tokens “to better support multilingual applications”**, explicitly marketing Phi‑4‑mini as significantly improved over Phi‑3.5‑mini in multilingual scenarios. [ar5iv.labs.arxiv](https://ar5iv.labs.arxiv.org/html/2503.01743)
-- Model cards and Microsoft/NVIDIA docs describe **23+ supported languages including Arabic and French**, but they do **not publish per‑language Belebele/MMLU‑Arabic numbers**; only aggregate multilingual scores are reported. [aikosha.indiaai.gov](https://aikosha.indiaai.gov.in/home/models/details/phi_4_multimodal_instruct_multimodal_foundation_model.html)
-- The technical report shows Phi‑4‑Mini matching or beating larger open models in multilingual benchmarks overall, but again without an Arabic‑only slice. [ar5iv.labs.arxiv](https://ar5iv.labs.arxiv.org/html/2503.01743)
+Key takeaways for your use case:
 
-So: we know it’s **explicitly designed as a multilingual upgrade over Phi‑3.5‑mini with a larger vocab**, but we lack hard Arabic‑only scores.
+- The task is framed very narrowly (chunking only, no extra commentary).[2]
+- JSON structure is spelled out twice: once as single object, once as array of objects.[2]
+- It explicitly forbids modifications of the source text ("without any additions or modifications"), which you can adapt to "copy tokens exactly from the OCR lines".
 
-### JSON / grammar support
+For CNIE extraction, you can mirror this style:
 
-- Phi‑4‑mini adds **first‑class function calling** compared to Phi‑3.5; Microsoft calls out “the long‑awaited function calling feature is finally supported.” [techcommunity.microsoft](https://techcommunity.microsoft.com/blog/educatordeveloperblog/welcome-to-the-new-phi-4-models---microsoft-phi-4-mini--phi-4-multimodal/4386037)
-- The GGUF card shows a **tool-enabled function‑calling format where tools are described as JSON schemas inside `<|tool|>…<|/tool|>`**, and the model is trained to emit structured JSON blobs for tool calls.  [huggingface](https://huggingface.co/Mungert/Phi-4-mini-instruct.gguf)  
-- There is no built‑in `response_format={"type": "json_object"}` knob in the raw model; JSON mode is provided by the *serving stack* (Azure AI, NVIDIA NIM, etc.). Locally, you’d use **llama.cpp’s grammar / JSON schema** feature, which works fine with Phi‑4’s tokenizer.
+- Replace "chunking" with your field names.
+- State that every value must come from the provided, numbered OCR lines and must never be invented.
 
-### CPU speed vs Phi‑3.5‑mini
 
-- Same parameter count (3.8B) and similar transformer depth/width as Phi‑3.5‑mini; the main architectural changes are GQA and a larger vocab. [huggingface](https://huggingface.co/microsoft/Phi-4-mini-instruct)
-- In practice, Q4\_K\_M GGUF for a ~3.8B model is ~2–3 GB and runs at **very similar tokens/sec to Phi‑3.5‑mini** on CPU; community GGUF users report local inference in the same ballpark as other 4B Q4 models. [sparknlp](https://sparknlp.org/2025/07/25/phi_4_mini_instruct_bf16_gguf_en.html)
-- Given you see **8–12 s** for ~500‑token prompts with Phi‑3.5‑mini Q4\_K\_M, Phi‑4‑mini Q4\_K\_M should land in roughly the **same latency range (possibly ~0–20 % slower at most)** on the same hardware.
+## LLMAIx: local LLM information extraction with explicit JSON prompt + grammar
 
-### Likely quality vs Phi‑3.5‑mini for your task
+The **LLMAIx** project (KatherLab) is a concrete example of using local LLMs for information extraction and anonymization, including when the input went through OCR.  Their tutorial shows exactly how they prompt the model to return a JSON object for medical reports.[5]
 
-- Compared to Phi‑3.5‑mini, Phi‑4‑mini adds:
-  - Much **larger vocab and explicit multilingual focus**, aimed at better handling non‑Latin scripts. [promptlayer](https://www.promptlayer.com/models/phi-4-mini-instruct)
-  - More and better **post‑training on function calling and structured outputs**, which directly helps JSON extraction pipelines. [techcommunity.microsoft](https://techcommunity.microsoft.com/blog/educatordeveloperblog/welcome-to-the-new-phi-4-models---microsoft-phi-4-mini--phi-4-multimodal/4386037)
-- There is no published DarijaMMLU or MSA‑only benchmark, but given:
-  - Your current Phi‑3.5‑mini results (9/10 clean, 6/10 noisy).  
-  - Phi‑4‑mini’s clear improvements on general multilingual + reasoning tasks in the same size budget. [promptlayer](https://www.promptlayer.com/models/phi-4-mini-instruct)
+Example prompt from the tutorial:
 
-I’d say Phi‑4‑mini‑instruct Q4\_K\_M is **the single most promising candidate and very likely a strict upgrade** for bilingual Arabic+French structured extraction, *without* blowing your latency/RAM budget.
+> From the following medical report, extract the following information and return it in JSON format:  
+> &nbsp;&nbsp;&nbsp;&nbsp;shortness of breath: true / false  
+> &nbsp;&nbsp;&nbsp;&nbsp;chest pain: true / false  
+> &nbsp;&nbsp;&nbsp;&nbsp;leg pain or swelling: true / false  
+> &nbsp;&nbsp;&nbsp;&nbsp;heart palpitations: true / false  
+> &nbsp;&nbsp;&nbsp;&nbsp;cough: true / false  
+> &nbsp;&nbsp;&nbsp;&nbsp;dizziness: true / false  
+> &nbsp;&nbsp;&nbsp;&nbsp;location: main / segmental / unknown  
+> &nbsp;&nbsp;&nbsp;&nbsp;side: left / right / bilateral  
+>  
+> This is the medical report:  
+> {report}:
 
-***
+They combine this with a **GBNF grammar** that hard‑restricts keys and types so the model can only emit valid JSON, for example:
 
-## 2. Gemma‑3 small variants (1B, 4B)
+```bnf
+root ::= allrecords
 
-### Availability & repos (GGUF)
+allrecords ::= (
+  "{" ws "\"shortness of breath\":" ws boolean ","
+  ws "\"chest pain\":" ws boolean ","
+  ...
+  ws "\"side\":" ws "\"" ( "left" | "right" | "bilateral" ) "\"" ","  
+  ws "}"
+  ws
+)
 
-- **Gemma‑3‑4B‑it (instruction‑tuned, multimodal, multilingual)**  
-  - Official QAT GGUF: `google/gemma-3-4b-it-qat-q4_0-gguf` (Q4\_0, ~2–3 GB). [huggingface](https://huggingface.co/google/gemma-3-4b-it-qat-q4_0-gguf)
-  - Community Q4\_K\_M GGUF: e.g. `nexaml/gemma-3-4b-it-GGUF` with `gemma-3-4b-it-Q4_K_M.gguf` (2.49 GB). [alpha-ollama.hf-mirror](https://alpha-ollama.hf-mirror.com/nexaml/gemma-3-4b-it-GGUF)
-- **Gemma‑3‑1B‑it (small, instruction‑tuned)**  
-  - Multiple GGUFs such as `adv-11/gemma-3-1b-it-Q4_K_M-GGUF` and `tensorblock/gemma-3-1b-it-GGUF` (`gemma-3-1b-it-Q4_K_M.gguf` ≈0.8 GB). [huggingface](https://huggingface.co/adv-11/gemma-3-1b-it-Q4_K_M-GGUF)
+boolean ::= "\"" ("true" | "false") "\"" ws
+```
 
-All of these are llama.cpp‑compatible.
 
-### Language & Arabic benchmarks
 
-- Google’s Gemma‑3 announcement:  
-  - Sizes: 1B, 4B, 12B, 27B.  
-  - **4B+ models: multilingual over 140 languages**, including Arabic; 1B is primarily English in pretraining but many community docs describe it as multilingual as well. [huggingface](https://huggingface.co/blog/gemma3)
-- Multilingual benchmarks (for PT models, but indicative):
-  - **Gemma‑3‑4B PT** achieves **Belebele 59.4 (average across languages)**, Global‑MMLU‑Lite 57.0, and good scores on Flores‑200 and WMT24++. [ollama](https://ollama.com/library/gemma3)
-- However, **Google does not publish per‑language Arabic Belebele/MMLU numbers** for Gemma‑3, only overall multilingual scores. [huggingface](https://huggingface.co/blog/gemma3)
+Relevance for your 3.8B GGUF setup:
 
-Given the 140‑language training and high Belebele average, Gemma‑3‑4B is almost certainly **stronger overall on multilingual reading comprehension than Gemma‑2‑2B**, and plausibly stronger than Phi‑3.5‑mini on Arabic text understanding—but that’s an inference, not measured Arabic‑only data.
+- This is exactly the **"instruct + JSON"** style you are already using, proven to work with local models (LLama‑family and others via llama.cpp).[5]
+- The **grammar/JSON‑schema layer** is used to catch and correct malformed outputs without relying on the model to always format correctly.[5]
+- You can adapt the same pattern to CNIE by listing fields such as `last_name_fr`, `first_name_ar`, `cnie_number`, and optional fields with allowed enumerations.
 
-### JSON / grammar & function calling
 
-- Gemma‑3 has **built‑in function calling and structured output capabilities**, explicitly marketed for generating JSON and integrating with tools/APIs. [labellerr](https://www.labellerr.com/blog/gemma-3/)
-- Again, the raw open‑weights model doesn’t “know” an OpenAI‑style `response_format` parameter, but Google’s serving layers (Vertex AI / AI Studio) expose JSON mode on top. Locally with llama.cpp, grammar‑based JSON enforcement works normally.
+## Instructor example: segmenting by line indices instead of regenerating text
 
-### CPU speed vs Phi‑3.5‑mini
+The **Instructor** documentation has a worked example of document segmentation where the model never regenerates section text; instead it returns **start and end line indices** into a numbered document.[3]
 
-- **Gemma‑3‑4B‑it Q4\_K\_M**: 4B parameters, 2.49 GB GGUF. With similar architecture to other 4B LLaMA‑like models, you can expect **very similar latency to Phi‑3.5‑mini / Phi‑4‑mini** for a ~500‑token prompt—maybe within ±20 %. [alpha-ollama.hf-mirror](https://alpha-ollama.hf-mirror.com/nexaml/gemma-3-4b-it-GGUF)
-- **Gemma‑3‑1B‑it Q4\_K\_M**: ~0.8 GB and 1B params; community reports ~2–4× faster CPU inference than 3.8B models at similar settings. [alpha-ollama.hf-mirror](https://alpha-ollama.hf-mirror.com/tensorblock/gemma-3-1b-it-GGUF)
+They define a Pydantic model where each section has line indices:
 
-So Gemma‑3‑1B could get you substantially faster runs, but at clear capacity trade‑offs.
+```python
+class Section(BaseModel):
+    title: str = Field(description="main topic of this section of the document")
+    start_index: int = Field(description="line number where the section begins")
+    end_index: int = Field(description="line number where the section ends")
 
-### Likely quality vs Phi‑3.5‑mini for your task
+class StructuredDocument(BaseModel):
+    """obtains meaningful sections, each centered around a single concept/topic"""
+    sections: List[Section]
+```
 
-- **Gemma‑3‑4B‑it**:
-  - Pros: Very strong multilingual backbone (140+ languages), high multilingual benchmark scores, robust instruction following, and Google‑grade function calling. [ai.google](https://ai.google.dev/gemma/docs/core?hl=ar)
-  - Cons: No explicit Arabic (or Darija) benchmark slice, and no evidence it’s tuned specifically for template noise or OCR artifacts.  
-  - My read: **promising but not obviously superior** to Phi‑4‑mini (or even Phi‑3.5‑mini) for *noisy Arabic OCR* and field‑level extraction. It should be good at mixed Arabic/French text comprehension but may still confuse template vs. personal text unless you strongly constrain with grammars and few‑shot examples.
+and preprocess the document so each line is explicitly tagged:
 
-- **Gemma‑3‑1B‑it**:
-  - 1B is attractive for speed, and still multilingual per Unsloth/PromptLayer cards, but its multilingual scores trail the 4B and larger models. [promptlayer](https://www.promptlayer.com/models/gemma-3-1b-it-gguf)
-  - For your task (Arabic names, cities, noisy OCR), **1B is very likely a downgrade** in extraction accuracy versus Phi‑3.5‑mini.
+```python
+def doc_with_lines(document):
+    document_lines = document.split("\n")
+    document_with_line_numbers = ""
+    for i, line in enumerate(document_lines):
+        document_with_line_numbers += f"[{i}] {line}\n"
+    return document_with_line_numbers, line2text
+```
 
-If you’re experimentation‑budget limited, I’d treat Gemma‑3‑4B‑it as a **secondary candidate to test after Phi‑4‑mini**, not an obviously better drop‑in replacement.
 
-***
 
-## 3. SmolLM3‑3B
+The system prompt then tells the model:
 
-### Availability & repos
+> You are a world class educator working on organizing your lecture notes.  
+> Read the document below and extract a StructuredDocument object from it where each section of the document is centered around a single concept/topic that can be taught in one lesson.  
+> Each line of the document is marked with its line number in square brackets (e.g.,,, etc). Use the line numbers to indicate section start and end.
 
-- Base instruction model: `HuggingFaceTB/SmolLM3-3B` (3B params, 11.2T tokens, 128K context). [aimodels](https://www.aimodels.fyi/models/huggingFace/smollm3-3b-base-huggingfacetb)
-- GGUF for llama.cpp: `ggml-org/SmolLM3-3B-GGUF` (multiple 4‑bit and higher quantizations). [huggingface](https://huggingface.co/ggml-org/SmolLM3-3B-GGUF)
+[3]
 
-### Language & Arabic benchmarks
+This matches your idea of **line‑ID‑only outputs**, and shows that small/medium models can do stable index assignment if:
 
-SmolLM3 is explicitly **multilingual with 6 primary languages (EN, FR, ES, DE, IT, PT)** plus smaller amounts of Arabic, Chinese, and Russian. [aimodels](https://www.aimodels.fyi/models/huggingFace/smollm3-3b-base-huggingfacetb)
+- Line numbers are visually obvious (`[0]`, `[1]`, …) and part of the text.
+- The schema exposes **only indices**, not free‑form text.
 
-Arabic (base model, zero‑shot): [huggingface](https://huggingface.co/ggml-org/SmolLM3-3B-GGUF)
 
-- **Belebele Arabic**: 40.22  
-- **Global MMLU (Arabic subset)**: 28.57  
-- **Flores‑200 Arabic (5‑shot)**: 40.22  
+## LLMWhisperer: line‑number provenance for extraction
 
-By contrast, Qwen‑3‑4B Base—one of the models you already tried—scores **Belebele Arabic 51.78 and Global MMLU 31.85**, which is substantially higher than SmolLM3’s Arabic. [huggingface](https://huggingface.co/ggml-org/SmolLM3-3B-GGUF)
-Since you found Qwen‑2.5‑3B/Qwen‑3‑4B not accurate enough for Arabic name extraction, SmolLM3’s **lower Arabic scores suggest it’s even less capable on Arabic than Qwen‑3‑4B**, despite being strong in its six main languages.
+The **LLMWhisperer Highlighting** docs describe a practical pattern for line‑aware extraction in production.
 
-French performance is much better: Belebele mid‑50s and solid Global MMLU for French, comparable to or above Qwen‑2.5‑3B at the same scale. [huggingface](https://huggingface.co/ggml-org/SmolLM3-3B-GGUF)
+Key steps in their design:[4]
 
-### JSON / structured output
+- The OCR or preprocessor returns each line with a **line number**, and they use **hexadecimal line IDs** to make them visually distinct from other numbers in the content.[4]
+- The extraction prompt instructs the LLM to **include the line numbers from which each field was extracted**.[4]
+- Coordinates for each line are stored separately, so the UI can highlight exact regions when a reviewer inspects the extracted data.[4]
 
-- The SmolLM3 blog and model cards emphasize **tool use and structured outputs**, saying it “reliably follows schema‑driven input‑output constraints” and is strong at tool‑calling. [hyper](https://hyper.ai/en/stories/e1feaa595eff6f8f9b3992d2537ba277)
-- `HuggingFaceTB/SmolLM3-3B` explicitly supports agentic tool‑calling (JSON blobs in `<tool_call>…</tool_call>` or Python‑style calls in `<code>…</code>`). [huggingface](https://huggingface.co/HuggingFaceTB/SmolLM3-3B)
-- No native `response_format` knob, but it plays very nicely with grammar‑constrained JSON generation.
+This confirms the approach you are using: the LLM never has to copy text perfectly; it only has to map schema fields → line IDs, and the application resolves those IDs back to OCR text.
 
-### CPU speed vs Phi‑3.5‑mini
 
-- 3B vs 3.8B parameters and efficient NoPE/GQA design. [aimodels](https://www.aimodels.fyi/models/huggingFace/smollm3-3b-base-huggingfacetb)
-- In practice, a 3B Q4\_K\_M GGUF tends to be **~20–30 % faster** than a 3.8B Q4\_K\_M model for the same prompt/threads. So you can reasonably expect **latencies modestly better than your current Phi‑3.5‑mini numbers**.
+## Deepschool.ai: comparing NuExtract, 0.5B Qwen, and Phi‑3.5‑mini for structured outputs
 
-### Likely quality vs Phi‑3.5‑mini for your task
+A deepschool.ai blog post explicitly compares **NuExtract‑tiny‑v1.5**, **Qwen‑2.5‑0.5B**, and **Phi‑3.5‑mini‑instruct** for structured output, using prompts that are close to what you need.[1]
 
-- For **French + JSON**, SmolLM3‑3B is great: strong French benchmarks and excellent structured‑output behavior. [marktechpost](https://www.marktechpost.com/2025/07/08/hugging-face-releases-smollm3-a-3b-long-context-multilingual-reasoning-model/)
-- For **Arabic**, the published Arabic Belebele/MMLU/Flores scores are **significantly below Qwen‑3‑4B and well below what you’d want for robust Arabic NER/field extraction**. [huggingface](https://huggingface.co/ggml-org/SmolLM3-3B-GGUF)
-- Given your experience that Qwen‑3‑4B already wasn’t good enough for Arabic names, SmolLM3‑3B is **very unlikely to beat Phi‑3.5‑mini** on Arabic‑heavy CNIE OCR, even though it may behave better on JSON schema following.
+### Template‑driven extraction
 
-Net: I would **not** expect SmolLM3‑3B to be a strict upgrade over Phi‑3.5‑mini for your specific bilingual Arabic+French ID‑card extraction.
+They first show a chat‑style template prompt for full JSON extraction:
 
-***
+```text
+<|input|>
+### Template:
+{template}
+### Text:
+{text}
 
-## 4. “Smaller Mistral”: Ministral‑3‑3B‑Instruct
+<|output|>
+```
 
-### Availability & repos
+The `template` variable is a JSON skeleton (e.g. `"Model": {"Name": "", ...}`) and the model is simply asked to fill it from the text.  This works best with NuExtract, but they also test Phi‑3.5‑mini.[1]
 
-- Base instruct model: `mistralai/Ministral-3-3B-Instruct-2512` (3.4B LM + 0.4B vision encoder). [apxml](https://apxml.com/models/ministral-3-3b)
-- GGUF for llama.cpp: `mistralai/Ministral-3-3B-Instruct-2512-GGUF` with multiple 4‑bit/5‑bit quantizations; designed explicitly for edge / local deployment. [huggingface](https://huggingface.co/mistralai/Ministral-3-3B-Reasoning-2512-GGUF)
+### Key‑by‑key extraction with Phi‑3.5‑mini
 
-### Language & Arabic benchmarks
+When they switch to extracting one key at a time, they use a more detailed system prompt:[1]
 
-- **Multilingual**: Model card explicitly lists Arabic among supported languages (“supports dozens of languages, including … Arabic”). [huggingface](https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512)
-- **Multilingual MMLU (Base 3B)**: 0.652 (65.2 %) for **Ministral‑3‑3B Base**, which is quite high for a 3B model and indicates strong overall multilingual reasoning. [huggingface](https://huggingface.co/mistralai/Ministral-3-3B-Reasoning-2512)
-- I could not find **Arabic‑only Belebele or MMLU‑Arabic scores**—only aggregate multilingual metrics. So its Arabic strength is inferred from the general multilingual numbers, not directly measured.
+```text
+You are a helpful assistant that can extract values given a requested key and data type.
+If you don't know, output "unknown". Be concise and precise.
+Don't repeat the key in the answer!
+```
 
-### JSON / grammar & function calling
+Then for each key they build:
 
-- Model card: Ministral‑3‑3B Instruct offers **“best‑in‑class agentic capabilities with native function calling and JSON outputting”**. [apxml](https://apxml.com/models/ministral-3-3b)
-- That means its chat template and post‑training explicitly target function‑calling‑style JSON objects, not just free‑form text.  
-- Again, local llama.cpp JSON grammars work fine and can further enforce strict JSON.
+```text
+### Text:
+{text}
+### Required Key:
+{key}
+```
 
-### CPU speed vs Phi‑3.5‑mini
+and decode only the assistant’s final short answer.[1]
 
-- Effective parameter count for text is 3.4B; the extra 0.4B is the vision encoder. [apxml](https://apxml.com/models/ministral-3-3b)
-- A 3.4B Q4\_K\_M GGUF will be **slightly faster than Phi‑3.5‑mini’s 3.8B**, but not dramatically—likely within ±15 % on your CPU.  
-- If your llama‑cpp build loads the vision tower (mmproj) as well, there’s some extra memory use but negligible impact on pure‑text throughput.
+Important behaviors you can borrow for CNIE:
 
-### Likely quality vs Phi‑3.5‑mini for your task
+- **One‑field‑at‑a‑time extraction** often reduces confusion vs asking for 10 fields in one shot, especially on small models.[1]
+- The instruction *"If you don't know, output \"unknown\""* is followed reasonably well even by Phi‑3.5‑mini; you can adapt that to `null` or `[]` for missing CNIE fields.[1]
+- The model is explicitly told **not** to repeat the key name, which avoids redundant output and makes parsing trivial.[1]
 
-- Pros:  
-  - Very strong **overall multilingual MMLU** for a 3B‑scale model, plus explicit Arabic support. [huggingface](https://huggingface.co/mistralai/Ministral-3-3B-Reasoning-2512)
-  - **Native JSON + function‑calling** post‑training, which directly benefits structured extraction. [huggingface](https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512)
-- Cons / unknowns:  
-  - No public Arabic‑only scores; we don’t know how it compares to Phi‑4 or Gemma‑3 on Arabic specifically.  
-  - Training focus is broad reasoning and multimodal tasks, not OCR‑noisy template extraction.
 
-Given that, I’d classify Ministral‑3‑3B‑Instruct as a **very interesting experimental candidate**. It might match or slightly beat Phi‑3.5‑mini on mixed Arabic/French understanding and JSON output, but with current evidence it’s **hard to claim it is strictly better** than Phi‑3.5‑mini (and especially Phi‑4‑mini) for your specific OCR + field‑extraction use case.
+## NuExtract 1.5: Phi‑3.5‑mini‑based multilingual extractor
 
-***
+NuMind’s **NuExtract 1.5** is a dedicated information‑extraction model fine‑tuned from **Phi‑3.5‑mini (3.8B)** specifically for “document → JSON” tasks.[6]
 
-## 5. “Any new <4B models I missed?”
+Key facts that matter for your bilingual Arabic/French ID cards:
 
-Here are the main 2025–2026 sub‑4B contenders relevant to your constraints:
+- NuExtract 1.5 is trained to do exactly one thing: **extract JSON structures from documents** and is reported to outperform GPT‑4o on an English zero‑shot benchmark while being 500× smaller.[6]
+- It is explicitly **multilingual**, based on Phi‑3.5‑mini’s support for Arabic, French, and many other languages.[6]
+- Training data is **50% English and 50% other languages**, with templates sometimes in English and sometimes in the document language.[6]
+- The dataset and training are **purely extractive**: the model is trained to *copy‑paste parts of the document and not generate anything new*, and to return empty results when information is missing.[6]
 
-1. **Phi‑4‑mini‑instruct (3.8B, 2025)** – already discussed; **top recommendation**. [huggingface](https://huggingface.co/microsoft/Phi-4-mini-instruct)
-2. **Gemma‑3‑4B‑it (4B, 2025)** – strong multilingual, good French, likely decent Arabic, multiple GGUF Q4/Q5; worth a trial. [huggingface](https://huggingface.co/google/gemma-3-4b-it-qat-q4_0-gguf)
-3. **Gemma‑3‑1B‑it (1B, 2025)** – many GGUF Q4\_K\_M builds; excellent for speed but likely weaker for noisy Arabic extraction. [huggingface](https://huggingface.co/adv-11/gemma-3-1b-it-Q4_K_M-GGUF)
-4. **Ministral‑3‑3B‑Instruct‑2512 (3.4B+0.4B, 2025)** – multilingual including Arabic, native JSON/function calling, GGUF Q4\_K\_M under 4 GB; good experimental option. [huggingface](https://huggingface.co/mistralai/Ministral-3-3B-Reasoning-2512-GGUF)
-5. **SmolLM3‑3B (3B, 2025)** – strong reasoning, French, JSON/tool calling; **Arabic metrics are clearly behind Qwen‑3‑4B**, so unlikely to beat Phi‑3.5‑mini for Arabic names. [marktechpost](https://www.marktechpost.com/2025/07/08/hugging-face-releases-smollm3-a-3b-long-context-multilingual-reasoning-model/)
+Although NuExtract wraps this into its own API and templates, the design strongly supports the prompting strategies you want for raw Phi‑3.5‑mini:
 
-Models I would *not* prioritize for your exact constraints:
+- Emphasize *copying substrings from the OCR lines*, never paraphrasing.
+- Allow and normalize empty values instead of encouraging the model to guess.
+- For multilingual documents, it is valid to keep your **system prompt in French** while still handling Arabic text, or to add a short Arabic meta‑instruction if you see confusion.
 
-- **Atlas‑Chat‑2B GGUF** – you already tested this and saw catastrophic hallucination of the prompt example; it’s Darija‑tuned but too small / too instruction‑focused for robust structured extraction. [huggingface](https://huggingface.co/QuantFactory/Atlas-Chat-2B-GGUF)
-- **C4AI Command R7B Arabic GGUF** – very strong Arabic capability, but **7B params**; Q4\_K\_M quantized files are typically around or above your 4 GB budget and will be substantially slower than 3–4B models on CPU. [huggingface](https://huggingface.co/eltay89/c4ai-command-r7b-arabic-02-2025-GGUF)
 
-I have not found any credible 1–3B 2025–2026 Arabic‑specialized GGUF model that both (a) beats Qwen‑3‑4B / SmolLM3 on Arabic benchmarks and (b) is demonstrably good at JSON‑style structured extraction. Most Arabic‑centric releases at that time are 7B+ or not in GGUF.
+## Summary of patterns that work with small LLMs
 
-***
+From these real examples, several stable patterns emerge for sub‑4B models doing document/ID extraction:
 
-## My practical recommendation
+| Pattern | Where it appears | Why it helps small models |
+|--------|------------------|---------------------------|
+| Number each input line and treat line IDs as first‑class data | Instructor doc segmentation, LLMWhisperer highlighting[3][4] | Avoids regeneration errors and lets the model operate in index space. |
+| Constrain output to strict JSON via grammar or schema | LLMAIx grammar, JSON Schema[5] | Removes many formatting errors and enforces keys/types. |
+| Make the task extremely narrow (chunking only, or one key at a time) | Microsoft chunking prompt, Deepschool key‑by‑key extraction[2][1] | Reduces cognitive load and cross‑field interference. |
+| Explicitly allow “unknown” / empty outputs | Deepschool Phi‑3.5 prompt, NuExtract’s extractive training[1][6] | Discourages hallucinations when OCR is noisy. |
+| Keep prompts short but very explicit about structure | All examples above | Smaller context and clearer constraints improve reliability. |
 
-If you want to minimize time spent and maximize chances of a genuine upgrade over Phi‑3.5‑mini on your CNIE pipeline:
 
-1. **Try `Phi‑4‑mini‑instruct` Q4\_K\_M first** (`Mungert/Phi-4-mini-instruct.gguf`). [huggingface](https://huggingface.co/Mungert/Phi-4-mini-instruct.gguf)
-   - Use llama‑cpp **grammar JSON** forcing and maybe a very small in‑prompt tool schema to reduce template hallucination.  
-   - Expect similar latency to your current Phi‑3.5‑mini Q4\_K\_M, with likely better multilingual robustness and JSON conformity.
+## How to adapt these to your CNIE OCR pipeline
 
-2. If you still see issues on Arabic name/city extraction, next best experiments:
+Based on the above, a robust prompt template for **line‑ID mapping with Phi‑3.5‑mini‑instruct** could look like this (in French to match most CNIE labels, but still handling Arabic lines):
 
-   - **Gemma‑3‑4B‑it Q4\_K\_M** from `nexaml/gemma-3-4b-it-GGUF` or `ggml-org/gemma-3-4b-it-GGUF`. [github](https://github.com/ggml-org/llama.cpp/issues/12784)
-   - **Ministral‑3‑3B‑Instruct‑2512 Q4\_K\_M** from `mistralai/Ministral-3-3B-Instruct-2512-GGUF`. [huggingface](https://huggingface.co/mistralai/Ministral-3-3B-Reasoning-2512-GGUF)
+```text
+Vous êtes un système d’extraction de données qui ne renvoie que du JSON.
+Votre tâche est de lire une liste de lignes OCR numérotées et d’indiquer, pour chaque champ, 
+LES NUMÉROS DE LIGNES d’où proviennent les valeurs.
 
-3. I would only test **SmolLM3‑3B** if you decide to prioritize French + JSON robustness over Arabic quality; its Arabic numbers are too low to expect an outright win over Phi‑3.5‑mini. [marktechpost](https://www.marktechpost.com/2025/07/08/hugging-face-releases-smollm3-a-3b-long-context-multilingual-reasoning-model/)
+Règles importantes :
+- Utilisez exactement les numéros de ligne entre crochets, par exemple [0], [1], [2]…
+- Ne copiez JAMAIS le texte des lignes, ne traduisez pas et ne reformulez pas.
+- Si une information est absente ou illisible, mettez [] pour ce champ.
+- Ne renvoyez AUCUN autre texte que le JSON demandé.
 
-If you want, I can help you design a *two‑stage* pipeline (e.g., one model specialized for Arabic name/city cleanup + transliteration, another for schema‑level JSON) that might outperform any single small LLM on your worst OCR cases.
+Voici les champs à extraire (les valeurs réelles seront reconstruites ensuite par un autre programme) :
+- last_name_fr : nom de famille en français
+- first_name_fr : prénom en français
+- last_name_ar : nom de famille en arabe
+- first_name_ar : prénom en arabe
+- cnie_number : numéro de carte nationale
+- birth_date : date de naissance
+- birth_place_fr : lieu de naissance en français
+- birth_place_ar : lieu de naissance en arabe
+
+Format de sortie JSON OBLIGATOIRE :
+{
+  "last_name_fr": [listes de numéros de lignes],
+  "first_name_fr": [...],
+  "last_name_ar": [...],
+  "first_name_ar": [...],
+  "cnie_number": [...],
+  "birth_date": [...],
+  "birth_place_fr": [...],
+  "birth_place_ar": [...]
+}
+
+Maintenant, voici les lignes OCR numérotées :
+[0] ...
+[1] ...
+[2] ...
+...
+```
+
+This combines:
+
+- The **line‑number conventions** from Instructor and LLMWhisperer.[3][4]
+- The **strict JSON output** and explicit field descriptions from LLMAIx.[5]
+- The **non‑hallucination rules** and willingness to leave fields empty from the NuExtract and Deepschool patterns.[6][1]
+
+For even more stability with a 3.8B model, you can:
+
+- Run **one or two fields per call** (Deepschool technique) in difficult cases like Arabic names vs French surnames.[1]
+- Add a simple grammar or JSON‑schema layer (LLMAIx approach) to guarantee syntactic correctness, then automatically retry when the model fails validation.[5]
+- Keep the French system prompt but include a short Arabic sentence such as “انسخ النص كما هو من السطور ولا تخترع أي معلومات” (“copy the text exactly from the lines and do not invent any information”) if you notice confusion on Arabic‑only cards.[6]
+
+These patterns are all used in real systems with small models, and they transfer well to your Phi‑3.5‑mini‑instruct + llama‑cpp‑python CNIE pipeline.

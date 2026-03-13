@@ -7,11 +7,26 @@ Pipeline:
   1. Card detection + perspective warp (preprocessor)
   2. OCR extraction (PaddleOCR Arabic)
   3. Template text filtering (remove boilerplate)
-  4. LLM field extraction (Phi-3.5-mini)
-  5. City Arabic name lookup (post-correction)
+  4. Multi-model LLM extraction (Phi-3.5-mini + NuExtract-1.5)
+  5. City Arabic name lookup (post-correction per model)
 """
 
+import os
+import sys
 import time
+
+os.environ.setdefault("NO_COLOR", "1")
+
+# Fix colorama crash on Windows (OSError: Windows error 6)
+try:
+    import colorama
+    colorama.just_fix_windows_console()
+except Exception:
+    os.environ["TERM"] = "dumb"
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(errors="replace")
 
 print("[1/4] Importing libraries...")
 import cv2
@@ -23,12 +38,12 @@ from services.preprocessor import preprocess_card
 print("[3/4] Loading OCR model...")
 from services.ocr_engine import run_ocr
 
-print("[4/4] Loading LLM (Phi-3.5-mini)...")
-from services.llm_extractor import extract_fields
+print("[4/4] Loading LLM models...")
+from services.llm_extractor import extract_fields_all, get_loaded_models
 from services.template_filter import filter_detections
 from services.city_lookup import fix_city_arabic
 
-print("All models loaded!")
+print(f"All models loaded! Active: {get_loaded_models()}")
 
 app = Flask(__name__)
 
@@ -49,7 +64,7 @@ def extract():
         if detail:
             entry["detail"] = detail
         steps.append(entry)
-        print(f"   [{len(steps)}/5] {name} — {elapsed}ms {detail}")
+        print(f"   [{len(steps)}] {name} — {elapsed}ms {detail}")
 
     # --- Validate input ---
     if "image" not in request.files:
@@ -81,45 +96,39 @@ def extract():
     log_step("OCR extraction", f"{raw_count} regions in {ocr_result['time_ms']}ms")
 
     # --- Step 3: Template filtering ---
-    raw_detections = [
-        {"text": d["text"], "confidence": d["confidence"]}
-        for d in ocr_result["detections"]
-    ]
-    filtered = filter_detections(raw_detections)
+    full_detections = ocr_result["detections"]
+    filtered = filter_detections(full_detections)
     log_step("Template filter", f"{raw_count} → {len(filtered)} useful detections")
 
-    # --- Step 4: LLM extraction ---
-    llm_result = extract_fields(filtered)
-    fields = llm_result["fields"]
-    log_step(
-        "LLM extraction",
-        f"{llm_result['time_ms']}ms | {llm_result['tokens_in']}→{llm_result['tokens_out']} tok"
-    )
+    # For frontend display (no polygon)
+    raw_detections = [
+        {"text": d["text"], "confidence": d["confidence"]}
+        for d in full_detections
+    ]
 
-    if fields is None:
-        log_step("LLM parse failed", llm_result["raw"][:200])
-        return jsonify({
-            "success": False,
-            "error": "LLM failed to produce valid JSON",
-            "raw_llm": llm_result["raw"],
-            "steps": steps,
-        }), 422
+    # --- Step 4: Multi-model LLM extraction ---
+    model_results = extract_fields_all(filtered)
 
-    # --- Step 5: City Arabic lookup ---
-    fields = fix_city_arabic(fields, detections=filtered)
-    log_step("City lookup", f"birth_place_ar → {fields.get('birth_place_ar', 'N/A')}")
+    for key, result in model_results.items():
+        if result and result.get("fields"):
+            log_step(f"LLM [{result['label']}]", f"{result['time_ms']}ms")
+        elif result:
+            log_step(f"LLM [{result['label']}]", f"FAILED — {result['time_ms']}ms")
+
+    # --- Step 5: City Arabic lookup (per model) ---
+    for key, result in model_results.items():
+        if result and result.get("fields"):
+            result["fields"] = fix_city_arabic(result["fields"], detections=filtered)
+
+    log_step("City lookup", "applied to all models")
 
     total_ms = round((time.time() - total_start) * 1000, 1)
     print(f"   DONE in {total_ms}ms\n")
 
     return jsonify({
         "success": True,
-        "fields": fields,
+        "models": model_results,
         "ocr_detections": raw_detections,
-        "llm_prompt": {
-            "system": llm_result["prompt_system"],
-            "user": llm_result["prompt_user"],
-        },
         "steps": steps,
         "total_ms": total_ms,
     })
@@ -132,4 +141,5 @@ if __name__ == "__main__":
     print("GET  /         — web interface")
     print("http://localhost:5000")
     print("=" * 50)
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    from werkzeug.serving import run_simple
+    run_simple("0.0.0.0", 5000, app, use_reloader=False, use_debugger=False)
