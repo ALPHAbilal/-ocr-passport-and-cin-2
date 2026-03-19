@@ -1,100 +1,127 @@
-Mistral-Nemo-12B (ID-assign)
-66.5s
+otal: 122.1s
+
+GPT-OSS-20B
+110.1s
 Last Name
-BILAL
-Last Name (AR)
-بلال
-First Name
 CHAFI
-First Name (AR)
+Last Name (AR)
 شافي
+First Name
+BILAL
+First Name (AR)
+بلال
 Birth Date
-22.01.2001
+2001-01-22
 Birth Place
 RABAT
 Birth Place (AR)
-الرباط
+الرياة
 Card Number
 AS13538
 Expiry Date
-19.03.2029
+2029-03-19
 Gender
 M
 
 Prompt
 ▼
 System
-Vous êtes un extracteur JSON pour carte nationale d'identité marocaine (CNIE).
-
-Tâche : À partir des lignes OCR numérotées, indiquez pour chaque champ UN SEUL numéro de ligne (entier).
-
-Contraintes :
-- [LABEL] = étiquette fixe. Ne jamais utiliser comme valeur.
-- Les champs _ar DOIVENT pointer vers une ligne [AR].
-- Les champs _fr DOIVENT pointer vers une ligne [FR].
-- Aucun doublon : chaque numéro de ligne est utilisé AU PLUS UNE FOIS.
-- Si le champ est absent ou illisible, mettez null.
-- Renvoyez UNIQUEMENT l'objet JSON, sans texte avant ou après.
-
-Comment identifier les noms :
-  Les noms apparaissent comme 2 PAIRES consécutives juste après les en-têtes [LABEL].
-  Chaque paire = une ligne [AR] suivie d'une ligne [FR] avec le MÊME nom dans les deux écritures.
-  Paire 1 (plus haut) = last_name (nom de famille). Paire 2 (juste en dessous) = first_name (prénom).
-  IMPORTANT : last_name et first_name sont deux mots DIFFÉRENTS. Si vous trouvez le même mot
-  pour les deux, c'est une erreur — cherchez le mot différent sur les lignes adjacentes.
-  Indice : une ligne [AR] et la ligne [FR] juste à côté qui contiennent des lettres-only
-  (pas de chiffres, pas de dates) forment une paire nom.
-
-Champs : last_name_fr, last_name_ar, first_name_fr, first_name_ar,
-         birth_date, birth_place_fr, birth_place_ar, card_number, expiry_date, gender
-
-Exemple d'entrée :
-[0] [LABEL] المملكة
-[1] [LABEL] ROYAUME DU MAROC
-[2] [LABEL] البطاقة الوطنية
-[3] [LABEL] CARTE NATIONALE D'IDENTITE
-[4] [AR] العلوي
-[5] [FR] ALAOUI
-[6] [AR] محمد
-[7] [FR] MOHAMMED
-[8] [LABEL] Né le
-[9] [FR] 15.06.1990
-[10] [LABEL] مزداد بتاريخ
-[11] [AR] الدار البيضاء
-[12] [FR] a CASABLANCA
-[13] [LABEL] Valable jusqu'au
-[14] [FR] 20.06.2030
-[15] [LABEL] صالحة الى غاية
-[16] [FR] AB123456
-[17] [FR] M
-
-Exemple de sortie :
-{"last_name_fr": 5, "last_name_ar": 4, "first_name_fr": 7, "first_name_ar": 6, "birth_date": 9, "birth_place_fr": 12, "birth_place_ar": 11, "card_number": 16, "expiry_date": 14, "gender": 17}
+Extract fields from Moroccan CNIE card OCR.
+Think in 2-3 short lines max, then output the JSON.
+{"last_name_fr":"","last_name_ar":"","first_name_fr":"","first_name_ar":"","birth_date":"","birth_place_fr":"","birth_place_ar":"","card_number":"","expiry_date":"","gender":""}
+- strip "a " prefix from birth_place_fr
+- OCR may garble text. If FR and AR refer to the same value, use the clearer one to correct the other.
+- null if missing
 User
-Lignes OCR:
-
-[0] [LABEL] المعربية
-[1] [LABEL] المملكة
-[2] [LABEL] ROYAUME DU MAROC
-[3] [LABEL] للتعريف
-[4] [LABEL] البطاقة الوطنية
-[5] [LABEL] CARTE NATIONALE D'IDENTITE
-[6] [AR] بلال
-[7] [FR] BILAL
-[8] [AR] شافي
-[9] [FR] CHAFI
-[10] [LABEL] Né le
-[11] [FR] 22.01.2001
-[12] [LABEL] مزداد بتانيخ
-[13] [AR] الرياة
-[14] [FR] a RABAT
-[15] [LABEL] Valable jusqu'au
-[16] [FR] 19.03.2029
-[17] [LABEL] صالحة الى غاية
-[18] [FR] AS13538
-[19] [FR] M
-[20] [FR] Thy
+المعربية
+المملكة
+ROYAUME DU MAROC
+للتعريف
+البطاقة الوطنية
+CARTE NATIONALE D'IDENTITE
+بلال
+BILAL
+شافي
+CHAFI
+Né le
+22.01.2001
+مزداد بتانيخ
+الرياة
+a RABAT
+Valable jusqu'au
+19.03.2029
+صالحة الى غاية
+AS13538
+M
+المدير العام للإمن الوطنى
+Thy
+عبد اللطيّف حموشي
 
 Raw Output
 ▼
-{"last_name_fr": 9, "last_name_ar": 8, "first_name_fr": 7, "first_name_ar": 6, "birth_date": 11, "birth_place_fr": 14, "birth_place_ar": 13, "card_number": 18, "expiry_date": 16, "gender": 19}
+<|channel|>analysis<|message|>We need to extract fields. The OCR text includes:
+
+Arabic: "المعربية" maybe "المعربية" but likely "المعربية" is part of "المعربية" maybe "المعربية" but actual name? The card shows "بلال" and "BILAL" as last name? Actually "بلال" is first name? Wait: The card shows:
+
+Arabic: "بلال" (BILAL) and "شافي" (CHAFI). So likely last name is "شافي" (CHAFI) and first name is "بلال" (BILAL). The French side shows "BILAL" and "CHAFI" as well. So last_name_fr = "CHAFI", last_name_ar = "شافي". first_name_fr = "BILAL", first_name_ar = "بلال".
+
+Birth date: "22.01.2001" (22 Jan 2001). So birth_date = "2001-01-22" maybe format? They didn't specify format. Use "2001-01-22" or "22.01.2001"? Probably "2001-01-22" is better. But we can output "2001-01-22".
+
+Birth place: French: "a RABAT" but we need strip "a " prefix. So "RABAT". Arabic: "الرياة" maybe "الرياة" but likely "الرياة" is "الرياة" maybe "الرياة" but actual place is "الرياة" maybe "الرياة" but we can use "الرياة". But we can correct using French: "RABAT". So birth_place_fr = "RABAT", birth_place_ar = "الرياة" or maybe "الرياة" but we can correct to "الرياة" but maybe "الرياة" is "الرياة". But we can use "الرياة" as Arabic. But we can also correct to "الرياة" but maybe "الرياة" is "الرياة". Let's keep as "الرياة".
+
+Card number: "AS13538" maybe "AS13538". So card_number = "AS13538".
+
+Expiry date: "19.03.2029" (19 March 2029). So expiry_date = "2029-03-19".
+
+Gender: "M" indicates male. So gender = "M".
+
+Now produce JSON.<|end|><|start|>assistant<|channel|>final<|message|>{"last_name_fr":"CHAFI","last_name_ar":"شافي","first_name_fr":"BILAL","first_name_ar":"بلال","birth_date":"2001-01-22","birth_place_fr":"RABAT","birth_place_ar":"الرياة","card_number":"AS13538","expiry_date":"2029-03-19","gender":"M"}
+
+Raw OCR Detections (23)
+▼
+المعربية
+93%
+المملكة
+93%
+ROYAUME DU MAROC
+100%
+للتعريف
+96%
+البطاقة الوطنية
+97%
+CARTE NATIONALE D'IDENTITE
+99%
+بلال
+95%
+BILAL
+100%
+شافي
+99%
+CHAFI
+100%
+Né le
+87%
+22.01.2001
+92%
+مزداد بتانيخ
+88%
+الرياة
+71%
+a RABAT
+90%
+Valable jusqu'au
+100%
+19.03.2029
+100%
+صالحة الى غاية
+97%
+AS13538
+100%
+M
+100%
+المدير العام للإمن الوطنى
+97%
+Thy
+53%
+عبد اللطيّف حموشي
+91%

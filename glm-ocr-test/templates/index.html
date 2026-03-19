@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CNIE OCR — GLM-OCR</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #f5f0e8;
+    color: #4a3728;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+  }
+
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    color: #5c3d2e;
+  }
+
+  .subtitle {
+    font-size: 0.85rem;
+    color: #8a7262;
+    margin-bottom: 32px;
+  }
+
+  /* Upload area */
+  .upload-area {
+    width: 100%;
+    max-width: 420px;
+    border: 2px dashed #c4a882;
+    border-radius: 12px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: #faf6f0;
+  }
+
+  .upload-area:hover, .upload-area.dragover {
+    border-color: #8b6914;
+    background: #f5ede0;
+  }
+
+  .upload-area.has-file {
+    border-style: solid;
+    border-color: #a08060;
+    padding: 16px 20px;
+  }
+
+  .upload-icon {
+    font-size: 2.2rem;
+    margin-bottom: 10px;
+    opacity: 0.5;
+  }
+
+  .upload-text {
+    font-size: 0.9rem;
+    color: #8a7262;
+  }
+
+  .upload-text strong {
+    color: #6b4c30;
+  }
+
+  .file-input { display: none; }
+
+  /* Preview */
+  .preview {
+    display: none;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+  }
+
+  .preview img {
+    width: 80px;
+    height: 50px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid #d4c4a8;
+  }
+
+  .preview-info {
+    flex: 1;
+    text-align: left;
+  }
+
+  .preview-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #5c3d2e;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+  }
+
+  .preview-size {
+    font-size: 0.75rem;
+    color: #8a7262;
+  }
+
+  .btn-change {
+    font-size: 0.75rem;
+    color: #8a7262;
+    background: none;
+    border: 1px solid #c4a882;
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+
+  .btn-change:hover { background: #f0e6d6; }
+
+  /* Extract button */
+  .btn-extract {
+    margin-top: 16px;
+    width: 100%;
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 12px;
+    background: #6b4c30;
+    color: #faf6f0;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: none;
+  }
+
+  .btn-extract:hover { background: #5a3d24; }
+  .btn-extract:disabled {
+    background: #b8a898;
+    cursor: not-allowed;
+  }
+
+  /* Progress */
+  .progress {
+    display: none;
+    margin-top: 24px;
+    width: 100%;
+    max-width: 420px;
+    text-align: center;
+  }
+
+  .progress-bar-track {
+    width: 100%;
+    height: 4px;
+    background: #e0d5c5;
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: #8b6914;
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.6s ease;
+  }
+
+  .progress-step {
+    font-size: 0.85rem;
+    color: #8a7262;
+  }
+
+  /* Result */
+  .result {
+    display: none;
+    margin-top: 28px;
+    width: 100%;
+    max-width: 500px;
+  }
+
+  .model-col { min-width: 0; }
+
+  .result-card {
+    background: #faf6f0;
+    border: 1px solid #d4c4a8;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .result-header {
+    padding: 14px 18px;
+    background: #6b4c30;
+    color: #faf6f0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .result-time {
+    font-weight: 400;
+    opacity: 0.8;
+    font-size: 0.75rem;
+  }
+
+  .result-body { padding: 6px 0; }
+
+  .field-row {
+    display: flex;
+    padding: 9px 18px;
+    border-bottom: 1px solid #ece4d6;
+    align-items: baseline;
+  }
+
+  .field-row:last-child { border-bottom: none; }
+
+  .field-label {
+    width: 110px;
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    color: #8a7262;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .field-value {
+    flex: 1;
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: #4a3728;
+    word-break: break-word;
+  }
+
+  .field-value.empty {
+    color: #c4a882;
+    font-style: italic;
+    font-weight: 400;
+  }
+
+  .field-value[dir="rtl"] {
+    text-align: right;
+    font-family: 'Segoe UI', 'Arabic Typesetting', 'Traditional Arabic', sans-serif;
+  }
+
+  /* OCR Detections */
+  .ocr-section {
+    margin-top: 16px;
+  }
+
+  .ocr-toggle {
+    width: 100%;
+    padding: 10px 18px;
+    background: #faf6f0;
+    border: 1px solid #d4c4a8;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #6b4c30;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .ocr-toggle:hover { background: #f5ede0; }
+
+  .ocr-toggle .arrow {
+    transition: transform 0.2s;
+    font-size: 0.7rem;
+  }
+
+  .ocr-toggle.open .arrow { transform: rotate(180deg); }
+
+  .ocr-list {
+    display: none;
+    margin-top: 8px;
+    background: #faf6f0;
+    border: 1px solid #d4c4a8;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .ocr-list.open { display: block; }
+
+  .ocr-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 7px 18px;
+    border-bottom: 1px solid #ece4d6;
+    font-size: 0.82rem;
+  }
+
+  .ocr-item:last-child { border-bottom: none; }
+
+  .ocr-text {
+    flex: 1;
+    color: #4a3728;
+    word-break: break-word;
+  }
+
+  .ocr-text[dir="rtl"] {
+    text-align: right;
+    font-family: 'Segoe UI', 'Arabic Typesetting', 'Traditional Arabic', sans-serif;
+  }
+
+  .ocr-conf {
+    flex-shrink: 0;
+    margin-left: 12px;
+    font-size: 0.72rem;
+    color: #8a7262;
+    font-weight: 500;
+  }
+
+  /* LLM Prompt */
+  .prompt-section {
+    margin-top: 16px;
+  }
+
+  .prompt-toggle {
+    width: 100%;
+    padding: 10px 18px;
+    background: #faf6f0;
+    border: 1px solid #d4c4a8;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #6b4c30;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .prompt-toggle:hover { background: #f5ede0; }
+  .prompt-toggle .arrow { transition: transform 0.2s; font-size: 0.7rem; }
+  .prompt-toggle.open .arrow { transform: rotate(180deg); }
+
+  .prompt-content {
+    display: none;
+    margin-top: 8px;
+    background: #2b2017;
+    border: 1px solid #d4c4a8;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .prompt-content.open { display: block; }
+
+  .prompt-label {
+    padding: 8px 14px 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #c4a882;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .prompt-text {
+    padding: 4px 14px 12px;
+    font-size: 0.75rem;
+    color: #e8dcc8;
+    font-family: 'Consolas', 'Courier New', monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .prompt-divider {
+    border: none;
+    border-top: 1px solid #4a3728;
+    margin: 0 14px;
+  }
+
+  /* Error */
+  .error {
+    display: none;
+    margin-top: 24px;
+    width: 100%;
+    max-width: 420px;
+    padding: 14px 18px;
+    background: #f5e8e0;
+    border: 1px solid #d4a898;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    color: #7a3b28;
+  }
+</style>
+</head>
+<body>
+
+<h1>CNIE Card Reader</h1>
+<p class="subtitle">GLM-OCR — Upload a Moroccan ID card photo to extract fields</p>
+
+<!-- Upload -->
+<div class="upload-area" id="uploadArea">
+  <div id="uploadPrompt">
+    <div class="upload-icon">&#9653;</div>
+    <p class="upload-text"><strong>Click to upload</strong> or drag & drop<br>JPG, PNG</p>
+  </div>
+  <div class="preview" id="preview">
+    <img id="previewImg" src="" alt="">
+    <div class="preview-info">
+      <div class="preview-name" id="previewName"></div>
+      <div class="preview-size" id="previewSize"></div>
+    </div>
+    <button class="btn-change" id="btnChange">Change</button>
+  </div>
+</div>
+<input type="file" class="file-input" id="fileInput" accept="image/*">
+
+<button class="btn-extract" id="btnExtract">Extract Fields</button>
+
+<!-- Progress -->
+<div class="progress" id="progress">
+  <div class="progress-bar-track">
+    <div class="progress-bar-fill" id="progressFill"></div>
+  </div>
+  <div class="progress-step" id="progressStep"></div>
+</div>
+
+<!-- Result -->
+<div class="result" id="result"></div>
+
+<!-- Error -->
+<div class="error" id="error"></div>
+
+<script>
+const uploadArea = document.getElementById('uploadArea');
+const fileInput = document.getElementById('fileInput');
+const preview = document.getElementById('preview');
+const uploadPrompt = document.getElementById('uploadPrompt');
+const previewImg = document.getElementById('previewImg');
+const previewName = document.getElementById('previewName');
+const previewSize = document.getElementById('previewSize');
+const btnChange = document.getElementById('btnChange');
+const btnExtract = document.getElementById('btnExtract');
+const progress = document.getElementById('progress');
+const progressFill = document.getElementById('progressFill');
+const progressStep = document.getElementById('progressStep');
+const resultDiv = document.getElementById('result');
+const errorDiv = document.getElementById('error');
+
+let selectedFile = null;
+
+// Upload area clicks
+uploadArea.addEventListener('click', (e) => {
+  if (e.target === btnChange || e.target.closest('#btnChange')) return;
+  fileInput.click();
+});
+
+btnChange.addEventListener('click', (e) => {
+  e.stopPropagation();
+  fileInput.click();
+});
+
+// Drag & drop
+uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop', (e) => {
+  e.preventDefault();
+  uploadArea.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) handleFile(fileInput.files[0]);
+});
+
+function handleFile(file) {
+  if (!file.type.startsWith('image/')) return;
+  selectedFile = file;
+
+  previewName.textContent = file.name;
+  previewSize.textContent = (file.size / 1024).toFixed(0) + ' KB';
+  previewImg.src = URL.createObjectURL(file);
+
+  uploadPrompt.style.display = 'none';
+  preview.style.display = 'flex';
+  uploadArea.classList.add('has-file');
+  btnExtract.style.display = 'block';
+  resultDiv.style.display = 'none';
+  errorDiv.style.display = 'none';
+}
+
+// Progress simulation
+const STEPS = [
+  { text: 'Detecting card...', pct: 15, delay: 0 },
+  { text: 'Reading text...', pct: 35, delay: 800 },
+  { text: 'Analyzing fields...', pct: 60, delay: 2000 },
+  { text: 'Almost done...', pct: 80, delay: 5000 },
+];
+
+let stepTimers = [];
+
+function startProgress() {
+  progress.style.display = 'block';
+  resultDiv.style.display = 'none';
+  errorDiv.style.display = 'none';
+  progressFill.style.width = '5%';
+  progressStep.textContent = '';
+  stepTimers.forEach(t => clearTimeout(t));
+  stepTimers = [];
+
+  STEPS.forEach(s => {
+    stepTimers.push(setTimeout(() => {
+      progressFill.style.width = s.pct + '%';
+      progressStep.textContent = s.text;
+    }, s.delay));
+  });
+}
+
+function stopProgress(success) {
+  stepTimers.forEach(t => clearTimeout(t));
+  progressFill.style.width = '100%';
+  progressStep.textContent = success ? 'Done' : 'Failed';
+  setTimeout(() => { progress.style.display = 'none'; }, 600);
+}
+
+// Field display config
+const FIELD_ORDER = [
+  { key: 'last_name_fr', label: 'Last Name' },
+  { key: 'last_name_ar', label: 'Last Name (AR)', rtl: true },
+  { key: 'first_name_fr', label: 'First Name' },
+  { key: 'first_name_ar', label: 'First Name (AR)', rtl: true },
+  { key: 'birth_date', label: 'Birth Date' },
+  { key: 'birth_place_fr', label: 'Birth Place' },
+  { key: 'birth_place_ar', label: 'Birth Place (AR)', rtl: true },
+  { key: 'card_number', label: 'Card Number' },
+  { key: 'expiry_date', label: 'Expiry Date' },
+  { key: 'gender', label: 'Gender' },
+];
+
+function esc(s) {
+  return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
+}
+
+function renderModelCard(key, result) {
+  const fields = result.fields || {};
+  const label = result.label || key;
+  const time = result.time_ms ? (result.time_ms / 1000).toFixed(1) + 's' : '';
+
+  let rows = '';
+  FIELD_ORDER.forEach(f => {
+    const val = fields[f.key];
+    const hasVal = val !== null && val !== undefined && val !== '';
+    const dir = f.rtl ? ' dir="rtl"' : '';
+    rows += `<div class="field-row">
+      <div class="field-label">${f.label}</div>
+      <div class="field-value${hasVal ? '' : ' empty'}"${dir}>${hasVal ? val : '—'}</div>
+    </div>`;
+  });
+
+  // Prompt section per model
+  let promptHtml = '';
+  if (result.prompt_user) {
+    const sysBlock = result.prompt_system
+      ? `<div class="prompt-label">System</div><div class="prompt-text">${esc(result.prompt_system)}</div><hr class="prompt-divider">`
+      : '';
+    promptHtml = `<div class="prompt-section">
+      <button class="prompt-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+        <span>Prompt</span><span class="arrow">&#9660;</span>
+      </button>
+      <div class="prompt-content">
+        ${sysBlock}
+        <div class="prompt-label">User</div>
+        <div class="prompt-text">${esc(result.prompt_user)}</div>
+      </div>
+    </div>`;
+  }
+
+  // Raw LLM output
+  let rawHtml = '';
+  if (result.raw) {
+    rawHtml = `<div class="prompt-section">
+      <button class="prompt-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+        <span>Raw Output</span><span class="arrow">&#9660;</span>
+      </button>
+      <div class="prompt-content">
+        <div class="prompt-text">${esc(result.raw)}</div>
+      </div>
+    </div>`;
+  }
+
+  return `<div class="model-col">
+    <div class="result-card">
+      <div class="result-header">
+        <span>${label}</span>
+        <span class="result-time">${time}</span>
+      </div>
+      <div class="result-body">${rows}</div>
+    </div>
+    ${promptHtml}${rawHtml}
+  </div>`;
+}
+
+function renderResult(data) {
+  const totalTime = data.total_ms ? (data.total_ms / 1000).toFixed(1) + 's' : '';
+  const models = data.models || {};
+  const modelKeys = Object.keys(models);
+
+  // Model result cards
+  let modelsHtml = '';
+  if (modelKeys.length > 0) {
+    const cards = modelKeys.map(k => renderModelCard(k, models[k])).join('');
+    modelsHtml = modelKeys.length > 1
+      ? `<div class="models-grid">${cards}</div>`
+      : cards;
+  }
+
+  // OCR detections
+  let ocrHtml = '';
+  const detections = data.ocr_detections || [];
+  if (detections.length) {
+    let items = '';
+    detections.forEach(d => {
+      const isAr = /[\u0600-\u06ff]/.test(d.text);
+      const dir = isAr ? ' dir="rtl"' : '';
+      const pct = (d.confidence * 100).toFixed(0) + '%';
+      items += `<div class="ocr-item">
+        <span class="ocr-text"${dir}>${d.text}</span>
+        <span class="ocr-conf">${pct}</span>
+      </div>`;
+    });
+    ocrHtml = `<div class="ocr-section" style="max-width:420px">
+      <button class="ocr-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+        <span>Raw OCR Detections (${detections.length})</span>
+        <span class="arrow">&#9660;</span>
+      </button>
+      <div class="ocr-list">${items}</div>
+    </div>`;
+  }
+
+  resultDiv.innerHTML = `<p style="font-size:0.75rem;color:#8a7262;margin-bottom:12px">Total: ${totalTime}</p>
+    ${modelsHtml}${ocrHtml}`;
+  resultDiv.style.display = 'block';
+}
+
+// Extract
+btnExtract.addEventListener('click', async () => {
+  if (!selectedFile) return;
+
+  btnExtract.disabled = true;
+  btnExtract.textContent = 'Processing...';
+  startProgress();
+
+  try {
+    const form = new FormData();
+    form.append('image', selectedFile);
+
+    const res = await fetch('/extract', { method: 'POST', body: form });
+    const data = await res.json();
+
+    if (data.success) {
+      stopProgress(true);
+      setTimeout(() => renderResult(data), 400);
+    } else {
+      stopProgress(false);
+      errorDiv.textContent = data.error || 'Extraction failed';
+      errorDiv.style.display = 'block';
+    }
+  } catch (err) {
+    stopProgress(false);
+    errorDiv.textContent = 'Connection error — is the server running?';
+    errorDiv.style.display = 'block';
+  }
+
+  btnExtract.disabled = false;
+  btnExtract.textContent = 'Extract Fields';
+});
+</script>
+</body>
+</html>
