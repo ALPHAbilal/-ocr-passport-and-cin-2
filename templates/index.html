@@ -546,19 +546,13 @@ function stopProgress(success) {
   setTimeout(() => { progress.style.display = 'none'; }, 600);
 }
 
-// Field display config
-const FIELD_ORDER = [
-  { key: 'last_name_fr', label: 'Last Name' },
-  { key: 'last_name_ar', label: 'Last Name (AR)', rtl: true },
-  { key: 'first_name_fr', label: 'First Name' },
-  { key: 'first_name_ar', label: 'First Name (AR)', rtl: true },
-  { key: 'birth_date', label: 'Birth Date' },
-  { key: 'birth_place_fr', label: 'Birth Place' },
-  { key: 'birth_place_ar', label: 'Birth Place (AR)', rtl: true },
-  { key: 'card_number', label: 'Card Number' },
-  { key: 'expiry_date', label: 'Expiry Date' },
-  { key: 'gender', label: 'Gender' },
-];
+// Field display — dynamic, renders whatever keys the LLM returns
+function fieldLabel(key) {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).replace(/ Fr$/, '').replace(/ Ar$/, ' (AR)');
+}
+function isRtl(key) {
+  return key.endsWith('_ar');
+}
 
 function esc(s) {
   return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
@@ -570,12 +564,12 @@ function renderModelCard(key, result) {
   const time = result.time_ms ? (result.time_ms / 1000).toFixed(1) + 's' : '';
 
   let rows = '';
-  FIELD_ORDER.forEach(f => {
-    const val = fields[f.key];
+  Object.keys(fields).forEach(k => {
+    const val = fields[k];
     const hasVal = val !== null && val !== undefined && val !== '';
-    const dir = f.rtl ? ' dir="rtl"' : '';
+    const dir = isRtl(k) ? ' dir="rtl"' : '';
     rows += `<div class="field-row">
-      <div class="field-label">${f.label}</div>
+      <div class="field-label">${fieldLabel(k)}</div>
       <div class="field-value${hasVal ? '' : ' empty'}"${dir}>${hasVal ? val : '—'}</div>
     </div>`;
   });

@@ -1,7 +1,7 @@
 """
-LLM field extractor for CNIE OCR pipeline.
+LLM field extractor for CNIE/Passport OCR pipeline.
 GPT-OSS-20B via llama-cpp-python.
-Model reasons freely, we extract the JSON from its output.
+Classifies document type by keywords, loads matching prompt.
 """
 
 import gc
@@ -13,17 +13,13 @@ import time
 from huggingface_hub import hf_hub_download
 from llama_cpp import Llama
 
+from services.document_config import DOCUMENTS, FALLBACK_PROMPT
+
 _N_THREADS = os.cpu_count() or 4
 _N_CTX = 2048
 _MODEL_REPO = "bartowski/openai_gpt-oss-20b-GGUF"
 _MODEL_FILE = "openai_gpt-oss-20b-Q4_K_M.gguf"
-
-_PROMPT = """Extract fields from Moroccan CNIE card OCR. Think 2-3 lines max, then JSON.
-{"last_name_fr":"","last_name_ar":"","first_name_fr":"","first_name_ar":"","birth_date":"","birth_place_fr":"","birth_place_ar":"","card_number":"","expiry_date":"","gender":""}
-- strip "a " from birth_place_fr
-- keep dates as printed (DD.MM.YYYY)
-- FR and AR fields refer to the same value. If one looks garbled, produce the correct version from your knowledge of the other. Always output a real word, never garbled OCR.
-- null if missing"""
+_CONFIDENCE_THRESHOLD = 0.95
 
 # Download model at startup
 _model_path = None
@@ -36,11 +32,56 @@ except Exception as e:
     print(f"  WARNING: download failed: {e}")
 
 
+# --- Classifier ---
+
+def _classify(ocr_text):
+    """Score each document type by keyword matches. Returns (doc_key, confidence)."""
+    text_lower = ocr_text.lower()
+    scores = {}
+
+    for key, doc in DOCUMENTS.items():
+        hits = 0
+        total = len(doc["keywords_fr"]) + len(doc["keywords_ar"])
+        if total == 0:
+            continue
+        for kw in doc["keywords_fr"]:
+            if kw.lower() in text_lower:
+                hits += 1
+        for kw in doc["keywords_ar"]:
+            if kw in ocr_text:
+                hits += 1
+        scores[key] = hits / total
+
+    if not scores:
+        return None, 0.0
+
+    best = max(scores, key=scores.get)
+    return best, scores[best]
+
+
+# --- Prompt builders ---
+
+def _build_focused_prompt(doc_key):
+    """High confidence: one schema, one prompt."""
+    doc = DOCUMENTS[doc_key]
+    schema = json.dumps(doc["schema"], ensure_ascii=False)
+    return f"{doc['prompt']}\n{schema}"
+
+
+def _build_fallback_prompt():
+    """Low confidence: all schemas, LLM decides."""
+    types_block = ""
+    for key, doc in DOCUMENTS.items():
+        schema = json.dumps(doc["schema"], ensure_ascii=False)
+        types_block += f'- {doc["name"]}: {schema}\n'
+    return FALLBACK_PROMPT.replace("{types_block}", types_block.strip())
+
+
+# --- JSON extraction ---
+
 def _extract_json(text):
-    """Find the last JSON object in the text (after any reasoning)."""
-    # Find all JSON-like blocks
+    """Find the last JSON object in text (after reasoning)."""
     matches = list(re.finditer(r'\{[^{}]*\}', text, re.DOTALL))
-    # Try from last match backwards (JSON is at the end after reasoning)
     for m in reversed(matches):
         try:
             return json.loads(m.group())
@@ -49,18 +90,31 @@ def _extract_json(text):
     return None
 
 
+# --- Main ---
+
 def extract_fields_all(detections):
     if not _model_path:
         return {}
 
     ocr_text = "\n".join(d["text"] for d in detections)
 
+    # Classify
+    doc_key, confidence = _classify(ocr_text)
+
+    if confidence >= _CONFIDENCE_THRESHOLD and doc_key:
+        system_prompt = _build_focused_prompt(doc_key)
+        doc_name = DOCUMENTS[doc_key]["name"]
+    else:
+        system_prompt = _build_fallback_prompt()
+        doc_name = f"Unknown ({confidence:.0%})"
+
+    # Load → run → unload
     llm = Llama(model_path=_model_path, n_ctx=_N_CTX, n_threads=_N_THREADS, verbose=False)
 
     t0 = time.time()
     response = llm.create_chat_completion(
         messages=[
-            {"role": "system", "content": _PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": ocr_text},
         ],
         max_tokens=1024,
@@ -79,11 +133,11 @@ def extract_fields_all(detections):
 
     return {
         "gpt_oss": {
-            "label": "GPT-OSS-20B",
+            "label": f"GPT-OSS-20B — {doc_name}",
             "fields": fields,
             "time_ms": round(elapsed_ms, 1),
             "raw": raw,
-            "prompt_system": _PROMPT,
+            "prompt_system": system_prompt,
             "prompt_user": ocr_text,
         }
     }
