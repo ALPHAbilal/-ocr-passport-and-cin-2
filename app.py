@@ -1,14 +1,9 @@
 """
-Flask CNIE OCR + LLM Extraction API
-
-POST /extract — accepts image, returns structured ID card fields.
+Flask CNIE OCR Comparison API
 
 Pipeline:
   1. Card detection + perspective warp (preprocessor)
-  2. OCR extraction (PaddleOCR Arabic)
-  3. Template text filtering (remove boilerplate)
-  4. Multi-model LLM extraction (Phi-3.5-mini + NuExtract-1.5)
-  5. City Arabic name lookup (post-correction per model)
+  2. Multi-OCR: PaddleOCR, DocTR, PassportEye side by side
 """
 
 import os
@@ -17,7 +12,6 @@ import time
 
 os.environ.setdefault("NO_COLOR", "1")
 
-# Fix colorama crash on Windows (OSError: Windows error 6)
 try:
     import colorama
     colorama.just_fix_windows_console()
@@ -28,20 +22,18 @@ except Exception:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(errors="replace")
 
-print("[1/4] Importing libraries...")
+print("[1/3] Importing libraries...")
 import cv2
 from flask import Flask, request, jsonify, render_template
 
-print("[2/4] Loading preprocessor...")
+print("[2/3] Loading preprocessor...")
 from services.preprocessor import preprocess_card
 
-print("[3/4] Loading OCR model...")
-from services.ocr_engine import run_ocr
+print("[3/3] Loading OCR engines...")
+from services.ocr_engine import run_all_ocr
 
-print("[4/4] Loading LLM model...")
-from services.llm_extractor import extract_fields_all, get_loaded_models
-
-print(f"All models loaded! Active: {get_loaded_models()}")
+# LLM commented out for now
+# from services.llm_extractor import extract_fields_all, get_loaded_models
 
 app = Flask(__name__)
 
@@ -58,13 +50,9 @@ def extract():
 
     def log_step(name, detail=""):
         elapsed = round((time.time() - total_start) * 1000, 1)
-        entry = {"step": name, "elapsed_ms": elapsed}
-        if detail:
-            entry["detail"] = detail
-        steps.append(entry)
+        steps.append({"step": name, "elapsed_ms": elapsed, "detail": detail})
         print(f"   [{len(steps)}] {name} — {elapsed}ms {detail}")
 
-    # --- Validate input ---
     if "image" not in request.files:
         return jsonify({"success": False, "error": "No image file provided"}), 400
 
@@ -78,44 +66,41 @@ def extract():
     # --- Step 1: Card detection + perspective warp ---
     card_result = preprocess_card(image_bytes)
     if not card_result["success"]:
-        print(f"   FAILED: {card_result['error']}")
-        return jsonify({
-            "success": False,
-            "error": f"Preprocessing failed: {card_result['error']}"
-        }), 422
+        return jsonify({"success": False, "error": f"Preprocessing failed: {card_result['error']}"}), 422
 
     card_image = card_result["image"]
     detection = card_result["debug"].get("detection", "unknown")
     log_step("Card detection + warp", f"{detection} → {card_image.shape[1]}x{card_image.shape[0]}")
 
-    # --- Step 2: OCR extraction ---
-    ocr_result = run_ocr(card_image)
-    raw_count = ocr_result["regions_found"]
-    log_step("OCR extraction", f"{raw_count} regions in {ocr_result['time_ms']}ms")
+    # --- Step 2: Multi-OCR ---
+    ocr_results = run_all_ocr(card_image)
+    log_step("OCR engines", f"{len(ocr_results)} engines")
 
-    # --- Step 3: LLM extraction ---
-    full_detections = ocr_result["detections"]
+    # Format as model cards for frontend (same structure as LLM results)
+    models = {}
+    for key, result in ocr_results.items():
+        dets = result["detections"]
+        # Build "fields" as numbered detections for display
+        fields = {}
+        for i, d in enumerate(dets):
+            fields[f"line_{i+1}"] = d["text"]
 
-    raw_detections = [
-        {"text": d["text"], "confidence": d["confidence"]}
-        for d in full_detections
-    ]
-
-    model_results = extract_fields_all(full_detections)
-
-    for key, result in model_results.items():
-        if result and result.get("fields"):
-            log_step(f"LLM [{result['label']}]", f"{result['time_ms']}ms")
-        elif result:
-            log_step(f"LLM [{result['label']}]", f"FAILED — {result['time_ms']}ms")
+        models[key] = {
+            "label": result["label"],
+            "fields": fields if fields else None,
+            "time_ms": result["time_ms"],
+            "raw": "\n".join(d["text"] for d in dets) if dets else "No text detected",
+            "prompt_system": None,
+            "prompt_user": None,
+        }
 
     total_ms = round((time.time() - total_start) * 1000, 1)
     print(f"   DONE in {total_ms}ms\n")
 
     return jsonify({
         "success": True,
-        "models": model_results,
-        "ocr_detections": raw_detections,
+        "models": models,
+        "ocr_detections": [],
         "steps": steps,
         "total_ms": total_ms,
     })
@@ -123,8 +108,8 @@ def extract():
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("CNIE OCR + LLM Extraction API")
-    print("POST /extract — send image, get structured fields")
+    print("CNIE OCR Comparison")
+    print("POST /extract — send image, compare OCR engines")
     print("GET  /         — web interface")
     print("http://localhost:5000")
     print("=" * 50)

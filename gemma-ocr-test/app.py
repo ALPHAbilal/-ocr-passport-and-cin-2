@@ -1,6 +1,6 @@
 """
-GLM-OCR CNIE — Vision OCR + structured extraction.
-0.9B vision model, runs on CPU.
+Gemma 3 4B Vision — CNIE extraction test.
+Image in → structured JSON out. Supports Arabic + French.
 """
 
 import json
@@ -10,23 +10,46 @@ from io import BytesIO
 
 from flask import Flask, request, jsonify, render_template
 from PIL import Image
-from transformers import AutoProcessor, AutoModelForImageTextToText
+import torch
+from transformers import Gemma3ForConditionalGeneration, AutoProcessor
 
-MODEL_ID = "zai-org/GLM-OCR"
+MODEL_ID = "google/gemma-3-4b-it"
 
-print("Loading GLM-OCR model...")
+print("Loading Gemma 3 4B...")
 t0 = time.time()
-processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-print(f"  Processor loaded ({time.time() - t0:.1f}s)")
-model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, trust_remote_code=True)
+model = Gemma3ForConditionalGeneration.from_pretrained(
+    MODEL_ID,
+    torch_dtype=torch.bfloat16,
+    device_map="cpu",
+)
+processor = AutoProcessor.from_pretrained(MODEL_ID)
 model.eval()
-print(f"  GLM-OCR ready ({time.time() - t0:.1f}s)")
+print(f"Gemma 3 4B ready ({time.time() - t0:.1f}s)")
 
-PROMPT = """Extract text ONLY from the ID card in this image. Ignore any UI, buttons, or background text.
-Return JSON: {"last_name_fr":"","last_name_ar":"","first_name_fr":"","first_name_ar":"","birth_date":"","birth_place_fr":"","birth_place_ar":"","card_number":"","expiry_date":"","gender":""}
-null if missing."""
+PROMPT = """Extract fields from this Moroccan CNIE national ID card.
+Return ONLY a JSON object. Read both French and Arabic text on the card.
+{"last_name_fr":"","last_name_ar":"","first_name_fr":"","first_name_ar":"","birth_date":"","birth_place_fr":"","birth_place_ar":"","card_number":"","expiry_date":"","gender":""}
+- birth_place_fr: the CITY name only, strip "a " or "à " prefix
+- birth_place_ar: the Arabic CITY name only (e.g. الرباط), not the label "مزداد بتاريخ"
+- gender: look for single letter M or F on the card
+- null if missing"""
 
 app = Flask(__name__)
+
+
+def _extract_json(text):
+    cleaned = text.strip().removeprefix("```json").removesuffix("```").strip()
+    try:
+        return json.loads(cleaned)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    matches = list(re.finditer(r'\{[^{}]*\}', text, re.DOTALL))
+    for m in reversed(matches):
+        try:
+            return json.loads(m.group())
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 @app.route("/")
@@ -53,7 +76,7 @@ def extract():
         }
     ]
 
-    print("  Building inputs...")
+    print("  Processing inputs...")
     t0 = time.time()
     inputs = processor.apply_chat_template(
         messages,
@@ -61,46 +84,35 @@ def extract():
         tokenize=True,
         return_dict=True,
         return_tensors="pt",
-    )
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    ).to(model.device)
     n_tokens = inputs["input_ids"].shape[1]
     print(f"  Input: {n_tokens} tokens ({time.time() - t0:.1f}s)")
 
     print("  Generating...")
     t_gen = time.time()
-    outputs = model.generate(**inputs, max_new_tokens=512)
+    with torch.no_grad():
+        outputs = model.generate(**inputs, max_new_tokens=300, do_sample=False)
     out_tokens = outputs[0].shape[0] - n_tokens
     print(f"  Generated {out_tokens} tokens ({time.time() - t_gen:.1f}s)")
 
-    input_len = inputs["input_ids"].shape[1]
-    raw = processor.decode(outputs[0][input_len:], skip_special_tokens=True)
+    raw = processor.decode(outputs[0][n_tokens:], skip_special_tokens=True)
     elapsed_ms = (time.time() - t0) * 1000
     total_ms = round((time.time() - total_start) * 1000, 1)
 
     print(f"  Output: {raw[:200]}...")
     print(f"  Total: {total_ms}ms")
 
-    # Extract JSON from output
+    # Parse JSON
+    parsed = _extract_json(raw)
     fields = None
-    cleaned = raw.strip().removeprefix("```json").removesuffix("```").strip()
-    try:
-        parsed = json.loads(cleaned)
+    if parsed:
         fields = {k: (v if v else None) for k, v in parsed.items()}
-    except (json.JSONDecodeError, TypeError):
-        matches = list(re.finditer(r'\{[^{}]*\}', raw, re.DOTALL))
-        for m in reversed(matches):
-            try:
-                parsed = json.loads(m.group())
-                fields = {k: (v if v else None) for k, v in parsed.items()}
-                break
-            except json.JSONDecodeError:
-                continue
 
     return jsonify({
         "success": True,
         "models": {
-            "glm_ocr": {
-                "label": "GLM-OCR (0.9B)",
+            "gemma3": {
+                "label": "Gemma 3 4B",
                 "fields": fields,
                 "time_ms": round(elapsed_ms, 1),
                 "raw": raw,
@@ -115,8 +127,8 @@ def extract():
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("GLM-OCR — Pure OCR Test")
-    print("http://localhost:5001")
+    print("Gemma 3 4B — CNIE Extraction Test")
+    print("http://localhost:5003")
     print("=" * 50)
     from werkzeug.serving import run_simple
-    run_simple("0.0.0.0", 5001, app, use_reloader=False, use_debugger=False)
+    run_simple("0.0.0.0", 5003, app, use_reloader=False, use_debugger=False)

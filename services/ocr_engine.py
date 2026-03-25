@@ -1,67 +1,118 @@
 """
-PaddleOCR Engine — Single Arabic model reads both Arabic + French.
-
-Key optimizations (based on research):
-- No JPEG round-trip: pass numpy arrays directly (preserves Arabic dots/diacritics)
-- 2x upscale + CLAHE + unsharp mask before OCR
-- Tuned detection thresholds to catch all text regions
-- Single Arabic model only (reads French at 0.99 confidence, French model adds garbage)
+Multi-config PaddleOCR Engine — multiple parameter sets side by side.
 """
 
 import time
-
 import cv2
 import numpy as np
-from paddleocr import PaddleOCR
 
-# --- Tuned detection params ---
-_DET_PARAMS = dict(
-    text_det_thresh=0.2,            # was 0.3 — catch lower-contrast text pixels
-    text_det_box_thresh=0.4,        # was 0.6 — let name boxes survive filtering
-    text_det_unclip_ratio=1.8,      # was 1.5 — expand boxes for tight-margin names
-    text_det_limit_side_len=1280,   # prevent downscaling that kills small text
-    text_det_limit_type='max',
-    use_doc_orientation_classify=False,
-    use_doc_unwarping=False,
-    use_textline_orientation=False,
-    text_rec_score_thresh=0.3,
-)
+# ============================================================
+# PaddleOCR configs — each is a different parameter set
+# ============================================================
 
-# --- Single model: Arabic reads both scripts ---
-print("Loading OCR model (Arabic PP-OCRv5, tuned detection)...")
-_t0 = time.time()
-_ocr = PaddleOCR(lang='ar', **_DET_PARAMS)
-print(f"OCR model ready ({time.time() - _t0:.1f}s)")
+_CONFIGS = {
+    "v1_default": {
+        "label": "Paddle v1 (default)",
+        "params": dict(
+            lang='ar',
+            text_det_thresh=0.15,
+            text_det_box_thresh=0.4,
+            text_det_unclip_ratio=1.8,
+            text_det_limit_side_len=1920,
+            text_det_limit_type='max',
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            text_rec_score_thresh=0.3,
+        ),
+        "preprocess": None,
+    },
+    "v2_highres": {
+        "label": "Paddle v2 (2560px)",
+        "params": dict(
+            lang='ar',
+            text_det_thresh=0.15,
+            text_det_box_thresh=0.3,
+            text_det_unclip_ratio=2.0,
+            text_det_limit_side_len=2560,
+            text_det_limit_type='max',
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            text_rec_score_thresh=0.2,
+        ),
+        "preprocess": None,
+    },
+    "v3_upscale": {
+        "label": "Paddle v3 (2x upscale + sharpen)",
+        "params": dict(
+            lang='ar',
+            text_det_thresh=0.15,
+            text_det_box_thresh=0.4,
+            text_det_unclip_ratio=1.8,
+            text_det_limit_side_len=2560,
+            text_det_limit_type='max',
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            text_rec_score_thresh=0.2,
+        ),
+        "preprocess": "upscale_sharpen",
+    },
+}
+
+_loaded = {}
 
 
-def run_ocr(image):
-    """
-    Run OCR on an image. Single pass, Arabic model reads both scripts.
+def _preprocess_upscale_sharpen(image):
+    """2x upscale + CLAHE + unsharp mask."""
+    h, w = image.shape[:2]
+    upscaled = cv2.resize(image, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+    # CLAHE on L channel
+    lab = cv2.cvtColor(upscaled, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+    enhanced = cv2.merge([l, a, b])
+    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+    # Unsharp mask
+    blur = cv2.GaussianBlur(enhanced, (0, 0), 3)
+    sharpened = cv2.addWeighted(enhanced, 1.5, blur, -0.5, 0)
+    return sharpened
 
-    Args:
-        image: numpy array (BGR)
 
-    Returns:
-        dict with:
-            - detections: list of {text, confidence, polygon}
-            - regions_found: int
-            - time_ms: float
-    """
-    # Pass numpy array directly — no JPEG compression that degrades Arabic dots
+def _load(key):
+    if key in _loaded:
+        return _loaded[key]
+    from paddleocr import PaddleOCR
+    cfg = _CONFIGS[key]
+    print(f"  Loading {cfg['label']}...")
     t0 = time.time()
-    results = _ocr.predict(image)
+    ocr = PaddleOCR(**cfg["params"])
+    print(f"  {cfg['label']} ready ({time.time() - t0:.1f}s)")
+    _loaded[key] = ocr
+    return ocr
+
+
+def _run_one(key, image):
+    cfg = _CONFIGS[key]
+    ocr = _load(key)
+
+    # Apply preprocessing if specified
+    img = image
+    if cfg["preprocess"] == "upscale_sharpen":
+        img = _preprocess_upscale_sharpen(image)
+
+    t0 = time.time()
+    results = ocr.predict(img)
     elapsed_ms = (time.time() - t0) * 1000
 
     detections = []
     if results:
         r = results[0]
-        rec_texts = r.get("rec_texts", [])
-        rec_scores = r.get("rec_scores", [])
-        rec_polys = r.get("rec_polys", [])
-
-        for i, text in enumerate(rec_texts):
-            score = rec_scores[i] if i < len(rec_scores) else 0.0
-            poly = rec_polys[i].tolist() if i < len(rec_polys) else []
+        for i, text in enumerate(r.get("rec_texts", [])):
+            score = r["rec_scores"][i] if i < len(r.get("rec_scores", [])) else 0.0
+            poly = r["rec_polys"][i].tolist() if i < len(r.get("rec_polys", [])) else []
             detections.append({
                 "text": text,
                 "confidence": round(float(score), 4),
@@ -69,7 +120,33 @@ def run_ocr(image):
             })
 
     return {
+        "label": cfg["label"],
         "detections": detections,
-        "regions_found": len(detections),
         "time_ms": round(elapsed_ms, 1),
     }
+
+
+# ============================================================
+# Public API
+# ============================================================
+
+def run_all_ocr(image):
+    """Run all OCR configs on the same image."""
+    results = {}
+
+    for key in _CONFIGS:
+        try:
+            results[key] = _run_one(key, image)
+            n = len(results[key]["detections"])
+            ms = results[key]["time_ms"]
+            print(f"    {results[key]['label']}: {n} detections in {ms}ms")
+        except Exception as e:
+            print(f"    {key}: FAILED — {e}")
+            results[key] = {
+                "label": _CONFIGS[key]["label"],
+                "detections": [],
+                "time_ms": 0,
+                "error": str(e),
+            }
+
+    return results

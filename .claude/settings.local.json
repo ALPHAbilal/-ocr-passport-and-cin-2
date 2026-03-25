@@ -3,7 +3,12 @@
     "allow": [
       "WebSearch",
       "WebFetch(domain:qwen.readthedocs.io)",
-      "WebFetch(domain:unsloth.ai)"
+      "WebFetch(domain:unsloth.ai)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:mindee.github.io)",
+      "WebFetch(domain:paddlepaddle.github.io)",
+      "WebFetch(domain:www.paddleocr.ai)"
     ]
   }
 }

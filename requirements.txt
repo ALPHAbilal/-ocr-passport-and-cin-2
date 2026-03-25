@@ -1,8 +1,14 @@
 flask>=3.0.0
 opencv-python>=4.8.0
 numpy>=1.24.0
+Pillow>=10.0.0
+
+# OCR engines
 paddlepaddle==3.2.1
 paddleocr==3.4.0
-Pillow>=10.0.0
-llama-cpp-python>=0.3.0
-huggingface-hub>=0.20.0
+python-doctr[torch]>=1.0.0
+passporteye>=2.2.0
+
+# LLM (commented out for now)
+# llama-cpp-python>=0.3.0
+# huggingface-hub>=0.20.0

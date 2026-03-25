@@ -1,127 +1,162 @@
-Here's the full breakdown. The short answer is: **llama-cpp-python's `Llama` class does NOT reliably support GLM-OCR vision yet** — the recommended path is `llama-server` with its HTTP API or Ollama. Here's every detail:
+Here's everything you need to integrate Baseer into your Flask app for Moroccan ID card OCR.
 
-***
+## HuggingFace Repo ID
 
-## 1. Does llama-cpp-python Support Vision?
+As of March 2026, Misraj has not published Baseer as a public model on HuggingFace — the LinkedIn post from the team confirmed "public API access soon" but the weights are not yet public. The HuggingFace collection page exists at [`Misraj/baseer`](https://huggingface.co/collections/Misraj/baseer-68d3c26ed81bde9454503e32) but access is gated. **You have two options:** [huggingface](https://huggingface.co/collections/Misraj/baseer-68d3c26ed81bde9454503e32)
 
-Yes, but with caveats. llama-cpp-python supports vision models through a `chat_handler` + `mmproj` (multimodal projector) file pattern — the same architecture llama.cpp uses internally. Full vision support via the new `libmtmd` library was merged into llama.cpp in **May 2025**, but llama-cpp-python's Python bindings lag behind and don't always expose the latest llama.cpp multimodal changes immediately. [github](https://github.com/abetlen/llama-cpp-python)
+1. **Contact Misraj** at misraj.ai to request model access (they offer an API)
+2. **Use the best public alternative**: `sherif1313/Arabic-handwritten-OCR-4bit-Qwen2.5-VL-3B-v3` — same base model (Qwen2.5-VL-3B), already 4-bit quantized, 2.5% CER, 0.57s/image [huggingface](https://huggingface.co/sherif1313/Arabic-handwritten-OCR-4bit-Qwen2.5-VL-3B-v3)
 
-For **GLM-OCR specifically**, the glm4v projector type caused a known error (`unknown projector type: glm4v`) even in the latest llama.cpp Docker images as of late 2025. The model uses the `glm4` architecture [ggml-org model card], and while there's a merged PR (`#19677`) adding GLM-OCR support to llama.cpp, community reports say **it works with `llama-cli` but not reliably with `llama-server`**. [reddit](https://www.reddit.com/r/LocalLLaMA/comments/1r8d4iq/model_support_glmocr_by_ngxson_pull_request_19677/)
+## API Compatibility with Qwen2.5-VL
 
-***
+Yes — Baseer uses the **exact same API** as Qwen2.5-VL since it's just a fine-tune of that base. You use `Qwen2_5_VLForConditionalGeneration` + `AutoProcessor`, not the generic `AutoModelForImageTextToText`. [huggingface](https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct)
 
-## 2. Standard llama-cpp-python Vision Pattern
+## Required Dependencies
 
-For models that ARE supported (LLaVA, Gemma3, Phi-3.5-Vision), the pattern is:
+```bash
+pip install transformers torch torchvision accelerate bitsandbytes
+pip install qwen-vl-utils   # critical — handles image/video preprocessing
+```
+
+`qwen-vl-utils` is the one non-standard dependency that's easy to miss. [huggingface](https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct)
+
+## Minimal OCR Code (Flask + Arabic ID Card)
 
 ```python
-from llama_cpp import Llama
-from llama_cpp.llama_chat_format import Llava15ChatHandler
+from flask import Flask, request, jsonify
+from PIL import Image
+import torch, json, io
+from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
+from qwen_vl_utils import process_vision_info
 
-chat_handler = Llava15ChatHandler(clip_model_path="mmproj-model-f16.gguf")
-llm = Llama(
-    model_path="model-Q4_K_M.gguf",
-    chat_handler=chat_handler,
-    n_ctx=4096,
-    n_gpu_layers=0  # CPU only
+app = Flask(__name__)
+
+# ─── Load model once at startup ───────────────────────────────────────────────
+MODEL_ID = "sherif1313/Arabic-handwritten-OCR-4bit-Qwen2.5-VL-3B-v3"
+# If Misraj releases publicly, swap to: "Misraj/Baseer"
+
+quant_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_use_double_quant=True,
 )
 
-import base64
-with open("image.jpg", "rb") as f:
-    b64_image = base64.b64encode(f.read()).decode()
+model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+    MODEL_ID,
+    quantization_config=quant_config,
+    device_map="cpu",   # use "auto" if you have a GPU
+    torch_dtype=torch.float16,
+)
+processor = AutoProcessor.from_pretrained(
+    MODEL_ID,
+    min_pixels=256 * 28 * 28,   # reduce token count for speed on CPU
+    max_pixels=1280 * 28 * 28,
+)
+model.eval()
 
-response = llm.create_chat_completion(messages=[{
-    "role": "user",
-    "content": [
-        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"}},
-        {"type": "text", "text": "Extract all text from this image."}
-    ]
-}])
-print(response["choices"][0]["message"]["content"])
-```
 
-The key requirement is always **two files**: the main `.gguf` (language model) + the `mmproj-*.gguf` (vision projector). [huggingface](https://huggingface.co/mradermacher/NuMarkdown-8B-Thinking-GGUF/discussions/1)
+# ─── OCR helper ───────────────────────────────────────────────────────────────
+JSON_SCHEMA_PROMPT = """You are an Arabic OCR assistant. Extract all text from this document image.
+Return ONLY a valid JSON object with these fields (use null if not found):
+{
+  "last_name": "...",
+  "first_name": "...",
+  "last_name_arabic": "...",
+  "first_name_arabic": "...",
+  "birth_date": "DD/MM/YYYY",
+  "birth_place": "...",
+  "id_number": "...",
+  "expiry_date": "DD/MM/YYYY",
+  "gender": "M or F"
+}"""
 
-***
-
-## 3. GLM-OCR Specific Chat Handler
-
-There is **no dedicated `GLM4VChatHandler`** in llama-cpp-python's current release. The GLM-4V architecture requires its own projector handling, and the `unknown projector type: glm4v` error blocks it on standard builds. You cannot substitute `Llava15ChatHandler` or `Llava16ChatHandler` — those are hardcoded to CLIP-based projectors, not GLM's custom vision encoder. [huggingface](https://huggingface.co/ggml-org/GLM-4.6V-GGUF/discussions/1)
-
-***
-
-## 4. Recommended Alternative: llama-server HTTP API (✅ Working)
-
-Based on community testing, `llama-server` (the binary, not the Python bindings) **does work** with GLM-OCR via the CLI image loader. The most reliable CPU-only workflow is: [reddit](https://www.reddit.com/r/LocalLLaMA/comments/1r8d4iq/model_support_glmocr_by_ngxson_pull_request_19677/)
-
-**Step 1 — Start the server:**
-```bash
-llama-server -hf ggml-org/GLM-OCR-GGUF --no-mmproj-offload -c 4096
-```
-
-**Step 2 — Send image via Python (minimal working example for ID card OCR):**
-```python
-import requests, base64, json
-
-with open("id_card.jpg", "rb") as f:
-    b64 = base64.b64encode(f.read()).decode()
-
-payload = {
-    "model": "glm-ocr",
-    "messages": [{
+def run_ocr(pil_image: Image.Image, structured: bool = True) -> dict | str:
+    prompt = JSON_SCHEMA_PROMPT if structured else "Extract all text from this image exactly as it appears, preserving Arabic script."
+    
+    messages = [{
         "role": "user",
         "content": [
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-            {"type": "text", "text": (
-                "Extract all text from this ID card. "
-                "Return a JSON object with fields: name, dob, id_number, address."
-            )}
-        ]
-    }],
-    "temperature": 0.1,
-    "max_tokens": 512
-}
-
-res = requests.post("http://127.0.0.1:8080/v1/chat/completions",
-                    json=payload,
-                    headers={"Content-Type": "application/json"})
-print(json.dumps(res.json()["choices"][0]["message"]["content"], indent=2))
-```
-
-***
-
-## 5. Simplest Alternative: Ollama API (✅ Easiest)
-
-If you prefer zero binary management, Ollama's Python SDK makes it one-liner simple: [ollama](https://ollama.com/library/glm-ocr)
-
-```python
-import ollama, base64
-
-with open("id_card.jpg", "rb") as f:
-    b64 = base64.b64encode(f.read()).decode()
-
-response = ollama.chat(
-    model="glm-ocr",
-    messages=[{
-        "role": "user",
-        "content": "Extract all text and return as JSON with name, dob, id_number, address.",
-        "images": [b64]  # Ollama accepts raw base64
+            {"type": "image", "image": pil_image},
+            {"type": "text", "text": prompt},
+        ],
     }]
-)
-print(response["message"]["content"])
+    
+    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    image_inputs, video_inputs = process_vision_info(messages)
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
+    ).to(model.device)
+    
+    with torch.no_grad():
+        generated_ids = model.generate(
+            **inputs,
+            max_new_tokens=512,
+            do_sample=False,   # greedy for OCR — more deterministic
+            temperature=None,
+            top_p=None,
+        )
+    
+    trimmed = [out[len(inp):] for inp, out in zip(inputs.input_ids, generated_ids)]
+    output = processor.batch_decode(trimmed, skip_special_tokens=True)[0]
+    
+    if structured:
+        # Strip markdown fences if model wraps output in ```json ... ```
+        output = output.strip().removeprefix("```json").removesuffix("```").strip()
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError:
+            return {"raw_text": output, "parse_error": "Model did not return valid JSON"}
+    return output
+
+
+# ─── Flask endpoint ────────────────────────────────────────────────────────────
+@app.route("/ocr", methods=["POST"])
+def ocr_endpoint():
+    if "image" not in request.files:
+        return jsonify({"error": "No image file provided"}), 400
+    
+    file = request.files["image"]
+    pil_image = Image.open(io.BytesIO(file.read())).convert("RGB")
+    
+    structured = request.args.get("structured", "true").lower() == "true"
+    result = run_ocr(pil_image, structured=structured)
+    
+    return jsonify(result)
+
+
+if __name__ == "__main__":
+    app.run(debug=False, port=5000)
 ```
 
-Install with `pip install ollama` and pull with `ollama pull glm-ocr` first.
+**Usage:**
+```bash
+curl -X POST http://localhost:5000/ocr \
+  -F "image=@moroccan_id.jpg"
+```
 
-***
+## RAM Requirements
 
-## Decision Guide
+| Mode | VRAM / RAM Usage |
+|---|---|
+| float16 (no quant) | ~7–8 GB |
+| 4-bit BnB quantization | ~2.5–3.5 GB |
+| 4-bit on CPU (16GB RAM) | ✅ Fits comfortably |
 
-| Method | Works with GLM-OCR | CPU-only | Complexity |
-|---|---|---|---|
-| `llama-cpp-python` Llama class | ⚠️ Unreliable (no GLM4V handler) | ✅ | Medium |
-| `llama-server` + HTTP API | ✅ Confirmed via CLI | ✅ | Low |
-| `ollama` Python SDK | ✅ Confirmed | ✅ | **Lowest** |
-| `llama-cli` interactive | ✅ Works | ✅ | Manual only |
+With 4-bit quantization on CPU, the 3B model uses roughly 2.5–3.5 GB RAM leaving plenty of headroom in your 16GB system. Expect **5–15 seconds per image on CPU** without a GPU — `min_pixels` tuning in the processor reduces this significantly. [huggingface](https://huggingface.co/sherif1313/Arabic-handwritten-OCR-4bit-Qwen2.5-VL-3B-v3)
 
-For a CPU-only production pipeline, go with **Ollama** if you want simplicity, or **llama-server + requests** if you need more control over quantization and context window. Skip the `llama-cpp-python` `Llama` class for GLM-OCR until a dedicated `GLM4VChatHandler` is added to the Python bindings. [huggingface](https://huggingface.co/ggml-org/GLM-4.6V-GGUF/discussions/1)
+## JSON Schema Prompting
+
+Yes, Qwen2.5-VL (and Baseer) respond well to JSON schema prompts in the system/user message. The model does **not** enforce structured output natively (no grammar-constrained decoding), so you need the fallback `json.loads` + error handling shown above. For more robust output, add `outlines` or `lm-format-enforcer` to constrain generation to valid JSON — though this adds complexity on CPU. [huggingface](https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct)
+
+## Quantized Alternatives While Baseer is Gated
+
+Since Baseer weights aren't public yet, these are the best drop-in replacements using the same code:
+
+- **`sherif1313/Arabic-handwritten-OCR-4bit-Qwen2.5-VL-3B-v3`** — 4-bit, 2.5% CER, 0.57s/image [huggingface](https://huggingface.co/sherif1313/Arabic-handwritten-OCR-4bit-Qwen2.5-VL-3B-v3)
+- **`NAMAA-Space/Qari-OCR-0.1-VL-2B-Instruct`** — 2B, lighter, strong printed Arabic (swap `Qwen2_5_VLForConditionalGeneration` → `Qwen2VLForConditionalGeneration`)
+
+Once Misraj releases Baseer publicly, it's a one-line swap of `MODEL_ID` and everything else stays identical.
