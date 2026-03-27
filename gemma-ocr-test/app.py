@@ -26,13 +26,15 @@ processor = AutoProcessor.from_pretrained(MODEL_ID)
 model.eval()
 print(f"Gemma 3 4B ready ({time.time() - t0:.1f}s)")
 
-PROMPT = """Extract fields from this Moroccan CNIE national ID card.
-Return ONLY a JSON object. Read both French and Arabic text on the card.
+PROMPT = """Moroccan CNIE national ID card. Return JSON only.
 {"last_name_fr":"","last_name_ar":"","first_name_fr":"","first_name_ar":"","birth_date":"","birth_place_fr":"","birth_place_ar":"","card_number":"","expiry_date":"","gender":""}
-- birth_place_fr: the CITY name only, strip "a " or "à " prefix
-- birth_place_ar: the Arabic CITY name only (e.g. الرباط), not the label "مزداد بتاريخ"
-- gender: look for single letter M or F on the card
-- null if missing"""
+
+Rules:
+- Read French text from the card for _fr fields, birth_date, expiry_date, card_number, gender.
+- For _ar fields: DO NOT read Arabic from the image. Translate the French value to Arabic.
+- Every _ar field MUST be filled if its _fr counterpart exists. Never null if _fr has a value.
+- birth_place_fr: city name only, strip "a " or "à " prefix.
+- gender: M or F. birth_date/expiry_date: keep as printed."""
 
 app = Flask(__name__)
 
@@ -91,7 +93,15 @@ def extract():
     print("  Generating...")
     t_gen = time.time()
     with torch.no_grad():
-        outputs = model.generate(**inputs, max_new_tokens=300, do_sample=False)
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=250,
+            do_sample=False,
+            repetition_penalty=1.1,
+            top_p=None,
+            top_k=None,
+            temperature=None,
+        )
     out_tokens = outputs[0].shape[0] - n_tokens
     print(f"  Generated {out_tokens} tokens ({time.time() - t_gen:.1f}s)")
 
